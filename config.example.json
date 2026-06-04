@@ -1,0 +1,35 @@
+{
+  "hospitalCode": "10681",
+  "hospitalName": "โรงพยาบาลปัตตานี",
+
+  "hub": {
+    "url": "https://medrecon-hie.pmkhospital.go.th",
+    "apiKey": "PASTE_API_KEY_FROM_HUB"
+  },
+
+  "hosxp": {
+    "host": "10.0.0.9",
+    "port": 3306,
+    "user": "readonly",
+    "password": "CHANGE_ME",
+    "database": "hos",
+    "comment": "ควรชี้ไปที่เครื่อง slave/replica ของ รพ. ไม่ใช่เครื่อง production หลัก"
+  },
+
+  "sync": {
+    "mode": "incremental",
+    "sinceDays": 180,
+    "overlapDays": 2,
+    "opdVisits": 5,
+    "ipdAdmits": 3,
+    "batchSize": 50,
+    "concurrency": 4,
+    "comment": "mode=incremental: รอบถัดไป sync เฉพาะคนที่มี visit ใหม่ตั้งแต่รอบก่อน (เร็ว/เบา). รอบแรก/--full จะดึงย้อนหลัง sinceDays วัน. overlapDays = เผื่อย้อนกลับกันข้อมูลแก้/จำหน่ายล่าช้า"
+  },
+
+  "schedule": {
+    "enabled": true,
+    "cron": "0 3 * * *",
+    "comment": "รันทุกวัน 03:00 (เวลาเครื่อง). ใช้ --once เพื่อรันครั้งเดียวแล้วจบ"
+  }
+}
