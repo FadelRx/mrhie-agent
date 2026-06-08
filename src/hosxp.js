@@ -46,6 +46,14 @@ async function getHn(conn, cid) {
   const [r] = await conn.query('SELECT hn FROM patient WHERE cid = ? LIMIT 1', [cid]);
   return r.length ? r[0].hn : null;
 }
+// บังคับให้ค่า LIMIT เป็นจำนวนเต็มบวกที่ปลอดภัย (อินไลน์ลง SQL ได้ ไม่ต้องผ่าน placeholder)
+function lim(n, def) { const x = parseInt(n, 10); return (Number.isFinite(x) && x > 0) ? x : def; }
+// SQL ย่อย: usage_special จาก sp_use (รวม name1..3 โดยตัดช่อง/จุดที่ว่างเปล่าทิ้ง)
+const SP_SPECIAL_SQL = `TRIM(CONCAT_WS(' ',
+        CASE WHEN sp.name1 REGEXP '^[ .]*$' THEN NULL ELSE sp.name1 END,
+        CASE WHEN sp.name2 REGEXP '^[ .]*$' THEN NULL ELSE sp.name2 END,
+        CASE WHEN sp.name3 REGEXP '^[ .]*$' THEN NULL ELSE sp.name3 END))`;
+const SP_JOIN_SQL = `LEFT JOIN sp_use sp ON sp.sp_use = opr.sp_use AND opr.sp_use NOT IN ('','0000000')`;
 
 // ---------- 2) demographics + ค่าสรุป + โรคประจำตัว + วันนัด ----------
 async function getSummary(conn, cid, hn) {
@@ -53,42 +61,48 @@ async function getSummary(conn, cid, hn) {
     `SELECT p.cid, p.hn, p.sex,
             TRIM(CONCAT_WS(' ', p.pname, p.fname, p.lname)) AS fullname,
             p.birthday,
-            TIMESTAMPDIFF(YEAR, p.birthday, CURDATE()) AS age
+            FLOOR(DATEDIFF(CURDATE(), p.birthday) / 365.25) AS age
        FROM patient p WHERE p.hn = ? LIMIT 1`, [hn]
   );
   const p = pr[0] || { cid };
 
-  // opdscreen ล่าสุด -> น้ำหนัก/ความดัน/BMI
-  const [sr] = await conn.query(
-    `SELECT s.bps, s.bpd, s.bw, s.bmi
-       FROM opdscreen s JOIN ovst o ON o.vn = s.vn
-      WHERE o.hn = ? AND (s.bps > 0 OR s.bw > 0)
-      ORDER BY o.vstdate DESC LIMIT 1`, [hn]
-  );
-  const s = sr[0] || {};
+  // opdscreen — ดึงค่าล่าสุด "ที่ไม่เป็นศูนย์" ของแต่ละตัวแยกกัน (bw/bmi/ความดัน อาจมาคนละ visit)
+  const oneVal = async (col, where) => {
+    const [r] = await conn.query(
+      `SELECT ${col} AS v FROM opdscreen os
+        WHERE os.hn = ? AND ${where}
+        ORDER BY os.vstdate DESC LIMIT 1`, [hn]
+    );
+    return r[0] ? r[0].v : null;
+  };
+  const bw  = await oneVal('ROUND(os.bw,1)',  'os.bw > 0');
+  const bmi = await oneVal('ROUND(os.bmi,1)', 'os.bmi > 0');
+  const bp  = await oneVal(`CONCAT(ROUND(os.bps),'/',ROUND(os.bpd))`, 'os.bps > 0');
 
-  // โรคประจำตัวจาก ovstdiag (ICD10 ที่พบบ่อย ล่าสุด 6 อันดับ)
+  // โรคประจำตัวจาก ovstdiag (ICD10 ที่พบบ่อยสุด 6 อันดับ)
   const [dr] = await conn.query(
-    `SELECT DISTINCT i.name AS dx
-       FROM ovstdiag d JOIN ovst o ON o.vn = d.vn
-       JOIN icd101 i ON i.code = d.diagcode
-      WHERE o.hn = ? AND d.diagcode <> ''
-      ORDER BY o.vstdate DESC LIMIT 6`, [hn]
+    `SELECT TRIM(ic.name) AS dx, COUNT(*) AS c
+       FROM ovstdiag od
+       LEFT JOIN icd101 ic ON ic.code = od.icd10
+      WHERE od.hn = ? AND ic.name IS NOT NULL
+      GROUP BY od.icd10
+      ORDER BY c DESC LIMIT 6`, [hn]
   );
   const chronic = dr.map(x => x.dx).filter(Boolean).join(', ') || null;
 
-  // วันนัดครั้งถัดไป (ที่ยังไม่ถึง) + คลินิก
+  // วันนัดครั้งถัดไป — อนาคตที่ใกล้สุดก่อน ถ้าไม่มีอนาคตค่อยเอาอดีตที่ใกล้สุด + คลินิก
   const [ar] = await conn.query(
-    `SELECT a.nextdate, a.nexttime, c.department AS clinic
+    `SELECT a.nextdate, a.nexttime, c.name AS clinic
        FROM oapp a LEFT JOIN clinic c ON c.clinic = a.clinic
-      WHERE a.hn = ? AND a.nextdate >= CURDATE()
-      ORDER BY a.nextdate ASC LIMIT 1`, [hn]
+      WHERE a.hn = ? AND a.nextdate IS NOT NULL
+      ORDER BY (a.nextdate >= CURDATE()) DESC, ABS(DATEDIFF(a.nextdate, CURDATE())) ASC
+      LIMIT 1`, [hn]
   );
   let next_appt = null, next_appt_at = null;
   if (ar[0]) {
     next_appt_at = isoDate(ar[0].nextdate);
     const t = (ar[0].nexttime || '').toString().slice(0, 5);
-    next_appt = `${buddhistDateTime(ar[0].nextdate)}${t ? ' ' + t : ''}${ar[0].clinic ? ' ' + ar[0].clinic : ''}`;
+    next_appt = `${buddhistDateTime(ar[0].nextdate)}${t ? ' ' + t : ''}${ar[0].clinic ? ' · ' + ar[0].clinic : ''}`;
   }
 
   return {
@@ -97,96 +111,131 @@ async function getSummary(conn, cid, hn) {
     sex: p.sex || null,
     birthdate: isoDate(p.birthday),
     age: p.age != null ? Number(p.age) : null,
-    weight: s.bw != null ? Number(s.bw) : null,
-    bmi: s.bmi != null ? Number(s.bmi) : null,
-    bp: (s.bps && s.bpd) ? `${Math.round(s.bps)}/${Math.round(s.bpd)}` : null,
+    weight: bw != null ? Number(bw) : null,
+    bmi: bmi != null ? Number(bmi) : null,
+    bp: bp || null,
     chronic, next_appt, next_appt_at,
   };
 }
 
 // ---------- 3) ผลแล็บ NCD (ล่าสุดแต่ละชนิด พร้อมวันที่) ----------
-// แมตช์ด้วยชื่อ lab (พกพาง่ายกว่าผูกรหัส lab_items_code ที่ต่างกันแต่ละ รพ.)
-const LAB_MAP = [
-  ['HbA1c', /hba1c|a1c/i],
-  ['FBS', /fbs|fasting.*glucose|glucose.*fasting/i],
-  ['eGFR', /egfr|gfr/i],
-  ['Chol', /cholesterol|^chol/i],
-  ['TG', /triglyceride|^tg\b/i],
-  ['HDL', /hdl/i],
-  ['LDL', /ldl/i],
-];
-function classifyLab(name) {
-  for (const [type, re] of LAB_MAP) if (re.test(name || '')) return type;
-  return null;
-}
+//   FBS/HbA1c อ่านตรงจาก opdscreen (จุดคัดกรอง), eGFR/ไขมัน อ่านจาก lab ตามรหัส lab_items_code
+//   รหัส lab_items_code เป็นค่ามาตรฐานของ รพ. นำร่อง — ปรับได้ที่นี่ถ้า รพ. ใช้รหัสต่าง
+const LAB_CODES = { egfr: '622', chol: '102', tg: '103', hdl: '91', ldl: '535' };
+const LAB_SCAN_VISITS = 25;   // มองหา lab ใน opdscreen ล่าสุดกี่ visit
 async function getLabs(conn, cid, hn) {
-  const [rows] = await conn.query(
-    `SELECT li.lab_items_name AS name, lo.lab_order_result AS val,
-            COALESCE(lh.report_date, lh.order_date, lh.vstdate) AS dt, lo.lab_items_unit AS unit
-       FROM lab_head lh
-       JOIN lab_order lo ON lo.lab_order_number = lh.lab_order_number
-       JOIN lab_items li ON li.lab_items_code = lo.lab_items_code
-      WHERE lh.hn = ? AND lo.lab_order_result IS NOT NULL AND lo.lab_order_result <> ''
-        AND ( li.lab_items_name REGEXP 'HbA1c|A1C|FBS|Glucose|GFR|Cholesterol|Triglyceride|HDL|LDL' )
-      ORDER BY dt DESC`, [hn]
-  );
-  const best = {};   // type -> latest
-  for (const r of rows) {
-    const type = classifyLab(r.name);
-    if (!type || best[type]) continue;     // rows เรียง desc แล้ว เก็บอันแรก = ล่าสุด
-    best[type] = {
-      lab_type: type,
-      lab_value: String(r.val).trim(),
-      unit: (r.unit || '').trim() || null,
-      lab_date: isoDate(r.dt),
-    };
+  const out = [];
+  const push = (type, val, unit, dt) => {
+    const v = (val == null) ? '' : String(val).trim();
+    if (v === '') return;
+    out.push({ lab_type: type, lab_value: v, unit: unit || null, lab_date: isoDate(dt) });
+  };
+
+  // FBS / HbA1c จาก opdscreen (ค่าล่าสุดที่ > 0)
+  const [fbs] = await conn.query(
+    `SELECT os.fbs AS v, os.vstdate AS dt FROM opdscreen os
+      WHERE os.hn = ? AND os.fbs > 0 ORDER BY os.vstdate DESC LIMIT 1`, [hn]);
+  if (fbs[0]) push('FBS', fbs[0].v, 'mg/dL', fbs[0].dt);
+
+  const [hba] = await conn.query(
+    `SELECT os.hba1c AS v, os.vstdate AS dt FROM opdscreen os
+      WHERE os.hn = ? AND os.hba1c > 0 ORDER BY os.vstdate DESC LIMIT 1`, [hn]);
+  if (hba[0]) push('HbA1c', hba[0].v, '%', hba[0].dt);
+
+  // eGFR จาก lab (ตามรหัส) ในช่วง opdscreen ล่าสุด N visit
+  const [egfr] = await conn.query(
+    `SELECT lo.lab_order_result AS v, v.vstdate AS dt
+       FROM (SELECT os.vn, os.vstdate FROM opdscreen os
+              WHERE os.hn = ? ORDER BY os.vstdate DESC LIMIT ${LAB_SCAN_VISITS}) v
+       JOIN lab_head lh  ON lh.vn = v.vn
+       JOIN lab_order lo ON lo.lab_order_number = lh.lab_order_number AND lo.lab_items_code = ?
+      WHERE COALESCE(lo.lab_order_result,'') <> ''
+      ORDER BY v.vstdate DESC LIMIT 1`, [hn, LAB_CODES.egfr]);
+  if (egfr[0]) push('eGFR', egfr[0].v, 'mL/min', egfr[0].dt);
+
+  // ไขมัน (chol/tg/hdl/ldl) — รวมใน visit เดียวกัน เอา visit ล่าสุดที่มี chol
+  const [lipid] = await conn.query(
+    `SELECT t.dt, t.chol, t.tg, t.hdl, t.ldl FROM (
+        SELECT v.vstdate AS dt,
+               MAX(CASE WHEN lo.lab_items_code = ? THEN lo.lab_order_result END) AS chol,
+               MAX(CASE WHEN lo.lab_items_code = ? THEN lo.lab_order_result END) AS tg,
+               MAX(CASE WHEN lo.lab_items_code = ? THEN lo.lab_order_result END) AS hdl,
+               MAX(CASE WHEN lo.lab_items_code = ? THEN lo.lab_order_result END) AS ldl
+          FROM (SELECT os.vn, os.vstdate FROM opdscreen os
+                 WHERE os.hn = ? ORDER BY os.vstdate DESC LIMIT ${LAB_SCAN_VISITS}) v
+          JOIN lab_head lh  ON lh.vn = v.vn
+          JOIN lab_order lo ON lo.lab_order_number = lh.lab_order_number
+                           AND lo.lab_items_code IN (?,?,?,?)
+         GROUP BY v.vn, v.vstdate HAVING chol IS NOT NULL
+         ORDER BY v.vstdate DESC LIMIT 1
+     ) t`,
+    [LAB_CODES.chol, LAB_CODES.tg, LAB_CODES.hdl, LAB_CODES.ldl, hn,
+     LAB_CODES.chol, LAB_CODES.tg, LAB_CODES.hdl, LAB_CODES.ldl]);
+  if (lipid[0]) {
+    const L = lipid[0];
+    push('Chol', L.chol, 'mg/dL', L.dt);
+    push('TG',   L.tg,   'mg/dL', L.dt);
+    push('HDL',  L.hdl,  'mg/dL', L.dt);
+    push('LDL',  L.ldl,  'mg/dL', L.dt);
   }
-  return Object.values(best);
+  return out;
 }
 
-// ---------- 4) ยา OPD (visit ล่าสุดที่มียา) ----------
+// ---------- 4) ยา OPD (visit ล่าสุดที่มียา) + ประเภท (OPD/ER) + คลินิก ----------
 async function getOpdVisits(conn, hn, limit) {
+  const n = lim(limit, 5);
   const [rows] = await conn.query(
     `SELECT o.vn AS visit_no, o.vstdate AS visit_date,
-            dt.name AS generic, dt.strength AS strength, opr.qty AS qty,
+            CASE WHEN EXISTS (SELECT 1 FROM er_regist er WHERE er.vn = o.vn) THEN 'ER' ELSE 'OPD' END AS visit_kind,
+            ov.main_dep AS clinic_code, kd.department AS clinic_name,
+            TRIM(REPLACE(dt.name,'$','')) AS generic, dt.strength AS strength, opr.qty AS qty,
             TRIM(CONCAT_WS(' ', du.name1, du.name2, du.name3)) AS sig_normal,
-            sp.special AS sig_special
+            ${SP_SPECIAL_SQL} AS sig_special
        FROM (
-            SELECT ov.vn, ov.vstdate
-              FROM ovst ov
-             WHERE ov.hn = ?
-               AND EXISTS (SELECT 1 FROM opitemrece r JOIN drugitems d ON d.icode = r.icode WHERE r.vn = ov.vn)
-             ORDER BY ov.vstdate DESC, ov.vn DESC
-             LIMIT ?
+            SELECT v.vn, v.vstdate
+              FROM ovst v
+              JOIN opitemrece r ON r.vn = v.vn
+              JOIN drugitems d  ON d.icode = r.icode
+             WHERE v.hn = ?
+             GROUP BY v.vn, v.vstdate
+             ORDER BY v.vstdate DESC LIMIT ${n}
        ) o
        JOIN opitemrece opr ON opr.vn = o.vn
        JOIN drugitems dt   ON dt.icode = opr.icode
+       JOIN ovst ov        ON ov.vn = o.vn
+       LEFT JOIN kskdepartment kd ON kd.depcode = ov.main_dep
        LEFT JOIN drugusage du ON du.drugusage = opr.drugusage
-       LEFT JOIN sp_use sp    ON sp.vn = o.vn AND sp.icode = opr.icode
-      ORDER BY o.vstdate DESC, dt.name`, [hn, limit]
+       ${SP_JOIN_SQL}
+      ORDER BY o.vstdate DESC, generic`, [hn]
   );
   return groupMeds(rows, 'OPD');
 }
 
 // ---------- 5) ยากลับบ้านตอน admit (IPD home med) ----------
 async function getIpdHomeMed(conn, hn, limit) {
+  const n = lim(limit, 3);
   const [rows] = await conn.query(
-    `SELECT i.an AS visit_no, COALESCE(i.dchdate, i.regdate) AS visit_date,
-            dt.name AS generic, dt.strength AS strength, opr.qty AS qty,
+    `SELECT i.an AS visit_no, i.regdate AS visit_date,
+            TRIM(REPLACE(dt.name,'$','')) AS generic, dt.strength AS strength, opr.qty AS qty,
             TRIM(CONCAT_WS(' ', du.name1, du.name2, du.name3)) AS sig_normal,
-            NULL AS sig_special
-       FROM (
-            SELECT ip.an, ip.regdate, ip.dchdate
-              FROM ipt ip
-             WHERE ip.hn = ?
-             ORDER BY ip.regdate DESC
-             LIMIT ?
-       ) i
-       JOIN ipt_order_no ion ON ion.an = i.an AND ion.order_type = 'HMe'
-       JOIN opitemrece opr   ON opr.order_no = ion.order_no
-       JOIN drugitems dt     ON dt.icode = opr.icode
+            ${SP_SPECIAL_SQL} AS sig_special
+       FROM ipt i
+       JOIN opitemrece opr ON opr.an = i.an
+       JOIN drugitems dt   ON dt.icode = opr.icode
        LEFT JOIN drugusage du ON du.drugusage = opr.drugusage
-      ORDER BY visit_date DESC, dt.name`, [hn, limit]
+       ${SP_JOIN_SQL}
+       LEFT JOIN ipt_order_no iod ON iod.order_no = opr.order_no
+       JOIN (
+            SELECT i2.an, MAX(i2.regdate) AS rd
+              FROM ipt i2
+              JOIN opitemrece o2     ON o2.an = i2.an
+              JOIN ipt_order_no iod2 ON iod2.order_no = o2.order_no AND iod2.order_type = 'HMe'
+             WHERE i2.hn = ?
+             GROUP BY i2.an
+             ORDER BY rd DESC LIMIT ${n}
+       ) latest ON latest.an = i.an
+      WHERE (iod.order_type = 'HMe' OR iod.order_type IS NULL)
+      ORDER BY i.regdate DESC, generic`, [hn]
   );
   return groupMeds(rows, 'IPD');
 }
@@ -197,11 +246,17 @@ function groupMeds(rows, visit_type) {
   for (const r of rows) {
     const key = String(r.visit_no);
     if (!map.has(key)) {
-      map.set(key, { visit_type, visit_no: key, visit_date: isoDate(r.visit_date), meds: [] });
+      map.set(key, {
+        visit_type, visit_no: key, visit_date: isoDate(r.visit_date),
+        visit_kind: (r.visit_kind || visit_type),                 // OPD | ER | IPD
+        clinic_code: (r.clinic_code != null ? String(r.clinic_code).trim() : null) || null,
+        clinic_name: (r.clinic_name || '').trim() || null,
+        meds: [],
+      });
     }
     const special = (r.sig_special || '').trim();
     const normal = (r.sig_normal || '').trim();
-    const sig = special ? (normal ? `${normal} | พิเศษ: ${special}` : `พิเศษ: ${special}`) : normal;
+    const sig = special ? (normal ? `${normal}  •  ${special}` : special) : normal;
     map.get(key).meds.push({
       generic: (r.generic || '').trim(),
       strength: (r.strength || '').trim() || null,
