@@ -31,5 +31,9 @@
     "enabled": true,
     "cron": "0 3 * * *",
     "comment": "รันทุกวัน 03:00 (เวลาเครื่อง). ใช้ --once เพื่อรันครั้งเดียวแล้วจบ"
-  }
+  },
+
+  "overrides": {},
+  "labCodes": {},
+  "_comment_overrides": "SQL ทั้งหมดดึงจาก Hub (จัดการที่เดียว). 2 ช่องนี้ไว้ override เฉพาะ รพ. ที่ HOSxP ต่าง — ปกติเว้นว่าง. overrides = ชื่อ table/column เช่น {\"col_diag\":\"diagcode\",\"ovst\":\"ovst_old\"}; labCodes = รหัส lab_items_code เช่น {\"egfr\":\"700\"}. ชื่อ token ที่ override ได้ดูจาก idents ใน pack (hub/packs/default.json)"
 }

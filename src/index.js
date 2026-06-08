@@ -8,11 +8,13 @@ const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
 const cron = require('node-cron');
-const { listCandidateCids, buildPatientPayload } = require('./hosxp');
+const { buildContext, listCandidateCids, buildPatientPayload } = require('./hosxp');
+const { fetchPack } = require('./pack');
 const { pushBatch } = require('./push');
 
 const CONFIG_PATH = process.env.AGENT_CONFIG || path.join(__dirname, '..', 'config.json');
 const STATE_PATH  = process.env.AGENT_STATE  || path.join(__dirname, '..', '.sync-state.json');
+const PACK_PATH   = process.env.AGENT_PACK   || path.join(__dirname, '..', '.query-pack.json');
 
 function loadConfig() {
   if (!fs.existsSync(CONFIG_PATH)) {
@@ -70,21 +72,27 @@ async function runSync(cfg, forceFull) {
   const { mode, cutoff } = computeCutoff(cfg, state, forceFull);
   console.log(`[agent] sync start  รพ.=${cfg.hospitalCode}  mode=${mode}  ตั้งแต่=${cutoff.toISOString().slice(0, 10)}  ${runStart.toISOString()}`);
 
+  // ดึง query pack จาก Hub (จัดการ SQL ที่เดียว) — Hub ล่มใช้ cache เดิม
+  const { pack, source } = await fetchPack(cfg, PACK_PATH);
+  const ctx = buildContext(pack, cfg);
+  console.log(`[agent] query pack v${pack.version ?? '?'}  (${source})`);
+
   const conn = await mysql.createConnection({
     host: cfg.hosxp.host, port: cfg.hosxp.port || 3306,
     user: cfg.hosxp.user, password: cfg.hosxp.password,
     database: cfg.hosxp.database, charset: 'utf8',
     dateStrings: false,
+    namedPlaceholders: true,        // ให้ใช้ :hn / :cid / :since ใน SQL ของ pack ได้
   });
 
   let pushFailed = false;
   try {
-    const cids = await listCandidateCids(conn, cutoff);
+    const cids = await listCandidateCids(conn, ctx, cutoff);
     console.log(`[agent] candidates: ${cids.length} คน`);
 
     // สร้าง payload (จำกัด concurrency กันโหลด DB)
     const built = await mapLimit(cids, cfg.sync.concurrency || 4,
-      (cid) => buildPatientPayload(conn, cid, cfg.sync));
+      (cid) => buildPatientPayload(conn, cid, ctx));
     const buildErrors = built.filter(p => p && p.__error).length;
     const payloads = built.filter(p => p && !p.__error && p.patient);
     if (buildErrors) console.warn(`[agent] build errors: ${buildErrors} คน (ข้ามไป)`);
