@@ -20,20 +20,19 @@
     "mode": "incremental",
     "sinceDays": 180,
     "overlapDays": 2,
-    "opdVisits": 5,
-    "ipdAdmits": 3,
     "batchSize": 50,
     "concurrency": 4,
-    "comment": "mode=incremental: รอบถัดไป sync เฉพาะคนที่มี visit ใหม่ตั้งแต่รอบก่อน (เร็ว/เบา). รอบแรก/--full จะดึงย้อนหลัง sinceDays วัน. overlapDays = เผื่อย้อนกลับกันข้อมูลแก้/จำหน่ายล่าช้า"
+    "comment": "ค่า default ใช้กับทุกงาน (job) — แต่ละ pack ระบุ sync ของตัวเองทับได้ที่ Hub. mode=incremental: รอบถัดไป sync เฉพาะคนที่มี movement ใหม่ตั้งแต่รอบก่อน. รอบแรก/--full ดึงย้อนหลัง sinceDays วัน. overlapDays = เผื่อย้อนกลับกันข้อมูลแก้/จำหน่ายล่าช้า"
   },
 
   "schedule": {
     "enabled": true,
     "cron": "0 3 * * *",
-    "comment": "รันทุกวัน 03:00 (เวลาเครื่อง). ใช้ --once เพื่อรันครั้งเดียวแล้วจบ"
+    "comment": "รันทุกวัน 03:00 (เวลาเครื่อง). agent ดึงทุกงาน (job) ที่ active จาก Hub มารันให้เอง. ใช้ --once รันครั้งเดียว, --full sync เต็ม, --job <name> รันเฉพาะงาน"
   },
 
   "overrides": {},
+  "config": {},
   "labCodes": {},
-  "_comment_overrides": "SQL ทั้งหมดดึงจาก Hub (จัดการที่เดียว). 2 ช่องนี้ไว้ override เฉพาะ รพ. ที่ HOSxP ต่าง — ปกติเว้นว่าง. overrides = ชื่อ table/column เช่น {\"col_diag\":\"diagcode\",\"ovst\":\"ovst_old\"}; labCodes = รหัส lab_items_code เช่น {\"egfr\":\"700\"}. ชื่อ token ที่ override ได้ดูจาก idents ใน pack (hub/packs/default.json)"
+  "_comment_overrides": "agent เป็น generic runner — SQL/นิยามงานทั้งหมดดึงจาก Hub. 3 ช่องนี้ไว้ override เฉพาะ รพ. ที่ HOSxP ต่าง — ปกติเว้นว่าง. (1) overrides = ชื่อ table/column/limit (idents) เช่น {\"col_diag\":\"diagcode\",\"opdVisits\":\"7\"}; (2) config = ค่าใน config ของ pack เช่น {\"labCodes\":{\"egfr\":\"700\"}}; (3) labCodes = ทางลัดของ config.labCodes (เก่า). ชื่อ token ที่ override ได้ดูจาก idents/config ใน pack ที่ Hub (hub/packs/<job>.json)"
 }

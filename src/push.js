@@ -1,12 +1,13 @@
-// ส่ง payload ขึ้น Hub ผ่าน HTTPS (ต้องใช้ Node 18+ ที่มี fetch ในตัว)
-async function pushBatch(hub, hospitalCode, patients) {
+// ส่ง raw rows ขึ้น Hub ผ่าน HTTPS (Node 18+ มี fetch ในตัว)
+// body กลาง: { job, items: [ { key, datasets: { name: rows[] } }, ... ] }
+async function pushItems(hub, hospitalCode, job, items) {
   const res = await fetch(hub.url.replace(/\/+$/, '') + '/api/ingest', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
       'Authorization': `Bearer ${hospitalCode}:${hub.apiKey}`,
     },
-    body: JSON.stringify({ patients }),
+    body: JSON.stringify({ job, items }),
   });
   const text = await res.text();
   let body; try { body = JSON.parse(text); } catch { body = { raw: text }; }
@@ -14,4 +15,4 @@ async function pushBatch(hub, hospitalCode, patients) {
   return body;
 }
 
-module.exports = { pushBatch };
+module.exports = { pushItems };
