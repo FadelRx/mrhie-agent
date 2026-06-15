@@ -6,7 +6,8 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
-    "once": "node src/index.js --once"
+    "once": "node src/index.js --once",
+    "explain": "node src/explain.js"
   },
   "dependencies": {
     "mysql2": "^3.9.7",
