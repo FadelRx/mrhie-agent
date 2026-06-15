@@ -83,7 +83,7 @@ async function runOneJob(conn, cfg, pack, state, forceFull) {
   console.log(`[agent] job=${job} v${pack.version ?? '?'}  mode=${mode}  ตั้งแต่=${since}`);
 
   const mapLimit = makeMapLimit(cfg.sync && cfg.sync.concurrency || 4);
-  const { items, total, errors, skipped } = await runJob(conn, pack, cfg, since, mapLimit);
+  const { items, total, errors, skipped } = await runJob(conn, pack, cfg, since, mapLimit, cfg._maxKeys);
   console.log(`[agent] job=${job} keys=${total} build_errors=${errors} skipped=${skipped} -> push ${items.length}`);
 
   // push เป็น batch
@@ -150,6 +150,8 @@ async function runSync(cfg, forceFull, onlyJob) {
   const forceFull = process.argv.includes('--full');
   const ji = process.argv.indexOf('--job');
   const onlyJob = ji >= 0 ? process.argv[ji + 1] : null;
+  const li = process.argv.indexOf('--limit');
+  if (li >= 0) cfg._maxKeys = parseInt(process.argv[li + 1], 10) || null;   // จำกัดจำนวนคนไข้ (smoke test)
 
   if (once || !(cfg.schedule && cfg.schedule.enabled)) {
     await runSync(cfg, forceFull, onlyJob).catch(e => { console.error('[agent] fatal:', e.message); process.exit(1); });

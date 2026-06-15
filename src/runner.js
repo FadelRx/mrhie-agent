@@ -100,11 +100,15 @@ async function listKeys(conn, ctx, since) {
 
 // ---------- รัน job หนึ่งครบ: คืน items ที่พร้อม push ----------
 //   mapLimit = ตัวคุม concurrency (ส่งมาจาก index.js), since = ISO date
-async function runJob(conn, pack, cfg, since, mapLimit) {
+async function runJob(conn, pack, cfg, since, mapLimit, maxKeys) {
   const ctx = buildContext(pack, cfg);
   const perKey = ctx.pack.datasets.filter(d => (d.scope || 'perKey') === 'perKey');
 
-  const keys = await listKeys(conn, ctx, since);
+  let keys = await listKeys(conn, ctx, since);
+  if (maxKeys && keys.length > maxKeys) {
+    console.log(`[agent] จำกัดจำนวน key เพื่อทดสอบ: ${keys.length} -> ${maxKeys} (--limit)`);
+    keys = keys.slice(0, maxKeys);
+  }
   const built = await mapLimit(keys, (key) => runPerKey(conn, ctx, perKey, key, since));
 
   const items = [];
