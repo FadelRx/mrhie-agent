@@ -2,12 +2,15 @@
 //  EXPLAIN tool — รัน EXPLAIN ให้ทุกคิวรี่ใน pack (driver + datasets) กับ HOSxP จริง
 //  ของแต่ละ รพ. เพื่อดูว่า "ใช้ index หรือวิ่งสแกนทั้งตาราง"
 //
-//  ใช้:  node src/explain.js                 (ทุก job, สุ่ม cid/hn ตัวอย่างให้เอง)
-//        node src/explain.js --job medrecon  (เฉพาะงาน)
-//        node src/explain.js --cid 1234567890123   (กำหนด cid ตัวอย่างเอง)
-//        node src/explain.js --since 2026-01-01     (กำหนดวัน cutoff ของ driver)
+//  ใช้:  node src/explain.js                       (ดึง pack จาก Hub/cache)
+//        node src/explain.js --pack ../hub/packs/medrecon.json   (อ่าน pack จากไฟล์ ไม่พึ่ง Hub)
+//        node src/explain.js --job medrecon        (เฉพาะงาน)
+//        node src/explain.js --cid 1234567890123 --hn 999999     (กำหนดค่า bind เอง)
+//        node src/explain.js --since 2026-01-01    (กำหนดวัน cutoff ของ driver)
 //
 //  *** EXPLAIN ไม่ได้รันคิวรี่จริง — ปลอดภัยกับ production/slave ***
+//  *** ไม่ดึงข้อมูลคนไข้จริงมาเป็นตัวอย่าง (กัน PII) — ใช้ค่า placeholder เพราะ
+//      แผนคิวรี่ (query plan) ไม่ขึ้นกับค่าใน bind อยู่แล้ว ***
 //  อ่านผล: คอลัมน์ type = ALL หรือ key = (none) คือ "สแกนทั้งตาราง" = ช้า ควรแก้
 // ============================================================================
 const fs = require('fs');
@@ -55,14 +58,27 @@ function summarizeExplain(rows) {
   return { lines, warns };
 }
 
+// อ่าน pack จากไฟล์ local (รองรับ pack เดี่ยว, array, หรือ {packs:[...]})
+function loadPackFile(file) {
+  const body = JSON.parse(fs.readFileSync(file, 'utf8'));
+  if (Array.isArray(body)) return body;
+  if (body && Array.isArray(body.packs)) return body.packs;
+  return [body];
+}
+
 (async () => {
   const cfg = loadConfig();
   const onlyJob = arg('--job');
-  let sampleCid = arg('--cid');
+  const packFile = arg('--pack');
+  // ค่า bind ตัวอย่าง: ใช้ placeholder เสมอ (ไม่แตะข้อมูลจริง) — แผนคิวรี่ไม่ขึ้นกับค่านี้
+  const sampleCid = arg('--cid') || '0000000000000';
+  const sampleHn = arg('--hn') || '0';
   const sinceArg = arg('--since');
   const since = sinceArg || (() => { const d = new Date(); d.setDate(d.getDate() - ((cfg.sync && cfg.sync.sinceDays) || 180)); return d.toISOString().slice(0, 10); })();
 
-  const { packs, source } = await fetchPacks(cfg, PACK_PATH);
+  const { packs, source } = packFile
+    ? { packs: loadPackFile(packFile), source: `file ${packFile}` }
+    : await fetchPacks(cfg, PACK_PATH);
   let jobs = packs;
   if (onlyJob) jobs = jobs.filter(p => (p.job || 'default') === onlyJob);
   console.log(`[explain] ${jobs.length} job(s) (${source}) · since=${since}\n`);
@@ -78,17 +94,8 @@ function summarizeExplain(rows) {
     for (const pack of jobs) {
       const ctx = buildContext(pack, cfg);
 
-      // หา cid/hn ตัวอย่าง (สำหรับ datasets ที่ผูกกับ :hn / :cid)
-      let sampleHn = null;
-      try {
-        const ptbl = ctx.idents.patient || 'patient';
-        const where = sampleCid ? `cid = ${conn.escape(sampleCid)}` : `cid IS NOT NULL AND CHAR_LENGTH(cid) = 13`;
-        const [pr] = await conn.query(`SELECT cid, hn FROM ${ptbl} WHERE ${where} LIMIT 1`);
-        if (pr[0]) { sampleCid = sampleCid || pr[0].cid; sampleHn = pr[0].hn; }
-      } catch (e) { console.warn(`[explain] หา cid/hn ตัวอย่างไม่ได้: ${e.message}`); }
-
-      const prev = { hn: [{ hn: sampleHn }] };   // ให้ bind $hn.hn ใช้ตัวอย่างนี้
-      console.log(`=== job: ${pack.job} v${pack.version ?? '?'}  (cid ตัวอย่าง=${sampleCid || '-'}, hn=${sampleHn || '-'}) ===`);
+      const prev = { hn: [{ hn: sampleHn }] };   // ให้ bind $hn.hn ใช้ค่า placeholder
+      console.log(`=== job: ${pack.job} v${pack.version ?? '?'}  (placeholder cid=${sampleCid}, hn=${sampleHn}) ===`);
 
       for (const q of collectQueries(pack)) {
         let sql, binds;
