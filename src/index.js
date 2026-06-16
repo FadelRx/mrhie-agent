@@ -131,6 +131,13 @@ async function runSync(cfg, forceFull, onlyJob) {
     namedPlaceholders: true,        // ให้ใช้ :hn / :cid / :since ใน SQL ของ pack ได้
   });
 
+  // เกราะกัน HOSxP รพช.เครื่องเล็ก: ตัดคิวรี่ที่หลุดวิ่งนานเกินที่ "ฝั่ง server" (MariaDB max_statement_time = วินาที)
+  // *** สำคัญ: timeout ฝั่ง client (mysql2) ไม่หยุดคิวรี่ที่ server — คิวรี่จะวิ่งกิน CPU ต่อแม้ agent ยอมแพ้แล้ว
+  //     (พิสูจน์มาแล้ว: คนไข้ที่ opd plan เพี้ยนทำให้ค้าง >12 นาที). อันนี้สั่งให้ DB ฆ่าคิวรี่เองเมื่อเกินเวลา
+  const maxQSec = Number(cfg.hosxp.maxQuerySeconds || (cfg.sync && cfg.sync.maxQuerySeconds) || 30);
+  try { await conn.query('SET SESSION max_statement_time = ?', [maxQSec]); console.log(`[agent] max_statement_time=${maxQSec}s (กันคิวรี่ค้าง)`); }
+  catch (e) { console.warn(`[agent] ตั้ง max_statement_time ไม่ได้ (${e.message}) — เซิร์ฟเวอร์อาจไม่รองรับ, ข้ามไป`); }
+
   const state = loadState();
   try {
     for (const pack of jobs) {
