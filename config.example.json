@@ -4,16 +4,18 @@
 
   "hub": {
     "url": "https://medrecon-hie.pmkhospital.go.th",
-    "apiKey": "PASTE_API_KEY_FROM_HUB"
+    "apiKey": "",
+    "_comment_apiKey": "แนะนำ: ปล่อยว่างแล้วตั้งใน .env (HUB_API_KEY=...) — ค่าใน .env ทับค่าตรงนี้ จะได้ไม่เก็บรหัส plaintext ในไฟล์นี้"
   },
 
   "hosxp": {
     "host": "10.0.0.9",
     "port": 3306,
     "user": "readonly",
-    "password": "CHANGE_ME",
+    "password": "",
     "database": "hos",
-    "comment": "ควรชี้ไปที่เครื่อง slave/replica ของ รพ. ไม่ใช่เครื่อง production หลัก"
+    "comment": "ควรชี้ไปที่เครื่อง slave/replica ของ รพ. ไม่ใช่เครื่อง production หลัก",
+    "_comment_password": "แนะนำ: ปล่อยว่างแล้วตั้งใน .env (HOSXP_PASSWORD=...) — ดู .env.example"
   },
 
   "sync": {

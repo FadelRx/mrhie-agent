@@ -13,8 +13,7 @@ const path = require('path');
 const mysql = require('mysql2/promise');
 const { renderSql, resolveBinds } = require('./pack');
 const { buildContext } = require('./runner');
-
-const CONFIG_PATH = process.env.AGENT_CONFIG || path.join(__dirname, '..', 'config.json');
+const { loadConfig } = require('./config');
 const PACK_PATH   = process.env.AGENT_PACK   || path.join(__dirname, '..', '..', 'hub', 'packs', 'medrecon.json');
 
 function arg(name, def) { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : def; }
@@ -43,7 +42,7 @@ function units(pack) {
 }
 
 (async () => {
-  const cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  const cfg = loadConfig('probe-perf');
   const pack = JSON.parse(fs.readFileSync(PACK_PATH, 'utf8'));
   const ctx = buildContext(pack, cfg);
   const limit = parseInt(arg('--limit', '25'), 10);

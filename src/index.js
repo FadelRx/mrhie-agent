@@ -18,17 +18,9 @@ const { runJob } = require('./runner');
 const { fetchPacks } = require('./pack');
 const { pushItems } = require('./push');
 
-const CONFIG_PATH = process.env.AGENT_CONFIG || path.join(__dirname, '..', 'config.json');
 const STATE_PATH  = process.env.AGENT_STATE  || path.join(__dirname, '..', '.sync-state.json');
 const PACK_PATH   = process.env.AGENT_PACK   || path.join(__dirname, '..', '.query-pack.json');
-
-function loadConfig() {
-  if (!fs.existsSync(CONFIG_PATH)) {
-    console.error(`[agent] config not found: ${CONFIG_PATH}  (คัดลอกจาก config.example.json)`);
-    process.exit(1);
-  }
-  return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-}
+const { loadConfig } = require('./config');
 
 // ---------- state: watermark แยกราย job ----------
 function loadState() {

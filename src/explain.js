@@ -19,13 +19,9 @@ const mysql = require('mysql2/promise');
 const { renderSql, resolveBinds, fetchPacks } = require('./pack');
 const { buildContext } = require('./runner');
 
-const CONFIG_PATH = process.env.AGENT_CONFIG || path.join(__dirname, '..', 'config.json');
 const PACK_PATH   = process.env.AGENT_PACK   || path.join(__dirname, '..', '.query-pack.json');
+const { loadConfig } = require('./config');
 
-function loadConfig() {
-  if (!fs.existsSync(CONFIG_PATH)) { console.error(`[explain] config not found: ${CONFIG_PATH}`); process.exit(1); }
-  return JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-}
 function arg(name) { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : null; }
 
 // เก็บทุก SQL ของ pack ออกมาเป็น list: { label, sqlSpec }  (datasets แบบ multi -> แยกเป็นหลายตัว)
