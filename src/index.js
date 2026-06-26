@@ -144,6 +144,12 @@ async function runSync(cfg, forceFull, onlyJob) {
 }
 
 (async () => {
+  // หน้าตั้งค่าผ่านเว็บ — ไม่ต้องมี config ครบก็เปิดได้ (ไว้กรอกค่าครั้งแรก)
+  if (process.argv.includes('--setup')) {
+    require('./setup').startSetup();
+    return;   // ค้างเป็น server ไม่ออก
+  }
+
   const cfg = loadConfig();
   const once = process.argv.includes('--once');
   const forceFull = process.argv.includes('--full');
