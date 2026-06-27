@@ -50,7 +50,7 @@ function readCurrent() {
 // ---------- เขียน .env แบบรักษาบรรทัด/คอมเมนต์เดิม (อัปเดตเฉพาะคีย์ที่ส่งค่ามา) ----------
 function upsertEnv(updates) {
   let lines = [];
-  try { lines = fs.readFileSync(ENV_PATH, 'utf8').split('\n'); } catch {}
+  try { const raw = fs.readFileSync(ENV_PATH, 'utf8'); if (raw.trim()) lines = raw.split('\n'); } catch {}
   for (const [key, val] of Object.entries(updates)) {
     if (val == null) continue;   // ไม่เปลี่ยน
     const re = new RegExp(`^\\s*${key}\\s*=`);
@@ -119,6 +119,37 @@ async function testHosxp(h) {
   } catch (e) {
     return { ok: false, message: `เชื่อมต่อไม่ได้: ${e.message}` };
   } finally { if (conn) try { await conn.end(); } catch {} }
+}
+
+// ลงทะเบียนด้วย enrollment code -> รับ API key จาก Hub -> เขียน .env + config.json ให้อัตโนมัติ
+async function enroll(input) {
+  const url = String(input.url || '').replace(/\/+$/, '');
+  const code = String(input.hospitalCode || '').trim();
+  if (!url) return { ok: false, message: 'ยังไม่ได้ใส่ URL ของ Hub' };
+  if (!code) return { ok: false, message: 'ยังไม่ได้ใส่รหัส รพ. (hospitalCode)' };
+  if (!input.code) return { ok: false, message: 'ยังไม่ได้ใส่โค้ดลงทะเบียน' };
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), 10000);
+    const res = await fetch(url + '/api/agent/enroll', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ hospitalCode: code, code: input.code }), signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    const text = await res.text(); let body; try { body = JSON.parse(text); } catch { body = {}; }
+    if (!res.ok) return { ok: false, message: (body && body.error) || `Hub ตอบ ${res.status}: ${text.slice(0, 120)}` };
+    if (!body.apiKey) return { ok: false, message: 'Hub ไม่ได้ส่ง API key กลับมา' };
+
+    upsertEnv({ HUB_API_KEY: body.apiKey });   // รหัส -> .env
+    let cfg = {}; try { cfg = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')); } catch {}
+    cfg.hospitalCode = code;
+    if (body.hospitalName && !cfg.hospitalName) cfg.hospitalName = body.hospitalName;
+    cfg.hub = { ...(cfg.hub || {}), url, apiKey: '' };
+    fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + '\n');
+    return { ok: true, message: `ลงทะเบียนสำเร็จ — ${body.hospitalName || code} ได้รับ API key แล้ว (บันทึกลง .env ให้แล้ว)` };
+  } catch (e) {
+    return { ok: false, message: `ลงทะเบียนไม่ได้: ${e.name === 'AbortError' ? 'หมดเวลา (timeout)' : e.message}` };
+  }
 }
 
 async function testHub(h) {
@@ -204,9 +235,18 @@ function page() {
   <div class='card'>
     <h2>🌐 Hub (ส่วนกลาง)</h2>
     <label>URL ของ Hub *</label><input id='hub_url' value='${esc(c.hub.url)}' placeholder='https://medrecon-hie.pmkhospital.go.th'>
+
+    <div style='background:#f3ead0;border:2px solid var(--ink);border-radius:10px;padding:14px;margin:14px 0;box-shadow:var(--sh-sm)'>
+      <div style='font-weight:700;font-size:13.5px;margin-bottom:4px'>🎫 ลงทะเบียนครั้งแรก (มีโค้ดจากผู้ดูแล Hub)</div>
+      <p class='note' style='margin:0 0 8px'>ถ้ายังไม่มี API key — ใส่ "โค้ดลงทะเบียน" ที่ได้จากผู้ดูแล แล้วกดลงทะเบียน ระบบจะรับ API key มาให้อัตโนมัติ (ใช้ <b>รหัส รพ.</b> + <b>URL Hub</b> ด้านบน)</p>
+      <input id='enroll_code' autocomplete='off' placeholder='เช่น ABCD-EFGH-JKLM-NPQR'>
+      <button style='margin-top:10px' onclick='enrollNow()'>🎫 ลงทะเบียน &amp; รับ API key</button>
+      <div id='st_enroll' class='status'></div>
+    </div>
+
     <label>API key ${c.hasHubKey ? "<span class='note'>(ตั้งไว้แล้ว)</span>" : '*'}</label>
     <input id='hub_apiKey' type='password' autocomplete='new-password' placeholder='${keyPh}'>
-    <p class='note'>ขอ API key จากผู้ดูแล Hub (หน้า /admin/hospitals)</p>
+    <p class='note'>ถ้าได้ API key มาเองก็วางตรงนี้ได้ · หรือใช้โค้ดลงทะเบียนด้านบนแทน</p>
     <button class='ghost' style='margin-top:12px' onclick="testConn('hub')">📡 ทดสอบเชื่อมต่อ Hub</button>
     <div id='st_hub' class='status'></div>
   </div>
@@ -259,6 +299,16 @@ async function testConn(which){
     show(el, j.ok ? 'ok' : 'bad', (j.ok ? '✅ ' : '⚠️ ') + j.message);
   } catch(e){ show(el, 'bad', '⚠️ เรียกทดสอบไม่ได้: ' + e.message); }
 }
+async function enrollNow(){
+  const el = $('st_enroll'); show(el, 'run', 'กำลังลงทะเบียนกับ Hub...');
+  const payload = { url: $('hub_url').value, hospitalCode: $('hospitalCode').value, code: $('enroll_code').value };
+  try {
+    const r = await fetch('/api/enroll', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(payload) });
+    const j = await r.json();
+    if (j.ok){ show(el, 'ok', '✅ ' + j.message); $('enroll_code').value=''; $('hub_apiKey').placeholder='ตั้งไว้แล้ว — เว้นว่าง=คงเดิม'; }
+    else show(el, 'bad', '⚠️ ' + j.message);
+  } catch(e){ show(el, 'bad', '⚠️ ลงทะเบียนไม่ได้: ' + e.message); }
+}
 async function saveAll(){
   const el = $('st_save'); show(el, 'run', 'กำลังบันทึก...');
   try {
@@ -293,6 +343,7 @@ function startSetup() {
       }
       if (req.method === 'POST' && req.url === '/api/test-hosxp') return json(res, 200, await testHosxp(await readBody(req)));
       if (req.method === 'POST' && req.url === '/api/test-hub')   return json(res, 200, await testHub(await readBody(req)));
+      if (req.method === 'POST' && req.url === '/api/enroll')     return json(res, 200, await enroll(await readBody(req)));
       if (req.method === 'POST' && req.url === '/api/save') {
         const body = await readBody(req);
         if (!String(body.hospitalCode || '').trim()) return json(res, 200, { ok: false, message: 'ต้องระบุรหัส รพ.' });
