@@ -26,8 +26,9 @@ function loadDotEnv() {
   }
 }
 
-function loadConfig(tag = 'agent') {
+function loadConfig(tag = 'agent', opts = {}) {
   if (!fs.existsSync(CONFIG_PATH)) {
+    if (opts.optional) return null;   // ให้หน้าเว็บ setup เช็คเองได้ ไม่ดับทั้งโปรเซส
     console.error(`[${tag}] config not found: ${CONFIG_PATH}  (คัดลอกจาก config.example.json)`);
     process.exit(1);
   }

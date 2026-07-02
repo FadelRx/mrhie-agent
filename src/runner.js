@@ -105,6 +105,7 @@ async function runJob(conn, pack, cfg, since, mapLimit, maxKeys) {
   const perKey = ctx.pack.datasets.filter(d => (d.scope || 'perKey') === 'perKey');
 
   let keys = await listKeys(conn, ctx, since);
+  const driverTotal = keys.length;              // จำนวนทั้งหมดที่เข้าเกณฑ์ (ก่อนตัดด้วย limit — ไว้ประมาณการทั้งรอบ)
   if (maxKeys && keys.length > maxKeys) {
     console.log(`[agent] จำกัดจำนวน key เพื่อทดสอบ: ${keys.length} -> ${maxKeys} (--limit)`);
     keys = keys.slice(0, maxKeys);
@@ -119,7 +120,7 @@ async function runJob(conn, pack, cfg, since, mapLimit, maxKeys) {
     if (r === null) { skipped++; continue; }     // required dataset ว่าง
     items.push({ key: keys[i], datasets: r });
   }
-  return { items, total: keys.length, errors, skipped };
+  return { items, total: keys.length, errors, skipped, driverTotal };
 }
 
 module.exports = { runJob, buildContext };
