@@ -24,7 +24,7 @@ const { CONFIG_PATH, loadDotEnv, loadConfig, defaultCron } = require('./config')
 const { runJob } = require('./runner');
 const { fetchPacks } = require('./pack');
 const { pushItems } = require('./push');
-const { runSync, isRunning, connectHosxp, loadState, computeCutoff, makeMapLimit, PACK_PATH } = require('./sync');
+const { runSync, isRunning, getProgress, connectHosxp, loadState, computeCutoff, makeMapLimit, PACK_PATH } = require('./sync');
 const logbuf = require('./logbuf');
 
 const ENV_PATH = process.env.AGENT_ENV || path.join(__dirname, '..', '.env');
@@ -297,7 +297,10 @@ button:disabled{background:#cfcabc;color:#7d7a6e;cursor:not-allowed;box-shadow:n
 .jobrow{border:2px solid var(--ink);border-radius:10px;padding:10px 12px;margin-top:10px;background:#fdfcf7}
 .logbox{background:var(--ink);color:#cfe9e0;border-radius:10px;border:2px solid var(--ink);padding:12px;font-family:'IBM Plex Mono',monospace;font-size:11.5px;line-height:1.6;max-height:320px;overflow:auto;white-space:pre-wrap;margin:0}
 details{margin-top:14px;border:2px solid var(--ink);border-radius:10px;padding:10px 14px;background:#fdfcf7}
-details summary{font-size:12.5px;font-weight:700;cursor:pointer}`;
+details summary{font-size:12.5px;font-weight:700;cursor:pointer}
+.pbar{height:22px;border:2px solid var(--ink);border-radius:11px;background:#fdfcf7;overflow:hidden;margin-top:10px;position:relative}
+.pbar>i{display:block;height:100%;background:var(--accent);transition:width .6s ease}
+.pbar>b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-style:normal}`;
 const FONT = `<link rel='preconnect' href='https://fonts.googleapis.com'><link href='https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600;700&family=IBM+Plex+Mono:wght@500&display=swap' rel='stylesheet'>`;
 
 function page() {
@@ -505,6 +508,15 @@ function renderStatus(s){
   const el = $('status_body');
   if (!s.hasConfig) { el.innerHTML = 'ยังไม่ได้ตั้งค่า — ไปที่แท็บ <b>⚙️ ตั้งค่า</b> เพื่อเริ่มติดตั้ง (4 ขั้นตอน)'; return; }
   var run = s.running ? '<span class="tag runy">⏳ กำลัง sync...</span>' : '<span class="tag ok">พร้อม</span>';
+  // แถบความคืบหน้าของรอบที่กำลังรัน — build (ดึงจาก HOSxP) แล้วต่อด้วย push (ส่งขึ้น Hub)
+  var pbar = '';
+  if (s.running && s.progress) {
+    var p = s.progress;
+    var pct = p.total ? Math.floor(p.done / p.total * 100) : 0;
+    var label = (p.phase === 'push' ? '📤 ส่งขึ้น Hub' : '🔎 ดึงข้อมูลจาก HOSxP') +
+      (p.total ? ' — ' + p.done.toLocaleString() + '/' + p.total.toLocaleString() + ' คน (' + pct + '%)' : ' — กำลังหารายชื่อ...');
+    pbar = '<div class="pbar"><i style="width:' + pct + '%"></i><b>' + label + '</b></div>';
+  }
   var sched = (s.schedule && s.schedule.enabled)
     ? 'เปิดอัตโนมัติ (cron: ' + esch(s.schedule.cron) + ')'
     : 'ปิดอัตโนมัติ — รันเองด้วยปุ่ม ▶ ด้านล่าง';
@@ -520,7 +532,7 @@ function renderStatus(s){
             ' · ข้าม ' + lr.skipped + ' · error ' + lr.buildErrors + ' · ใช้เวลา ' + Math.round(lr.tookMs/1000) + ' วิ (โหมด ' + lr.mode + ' ตั้งแต่ ' + lr.since + ')</div>' : '') +
       '</div>';
   });
-  el.innerHTML = '<div style="font-size:13.5px">รพ. <b>' + esch(s.hospitalName || '') + '</b> (' + esch(s.hospitalCode) + ') · สถานะ ' + run + '</div>' +
+  el.innerHTML = '<div style="font-size:13.5px">รพ. <b>' + esch(s.hospitalName || '') + '</b> (' + esch(s.hospitalCode) + ') · สถานะ ' + run + '</div>' + pbar +
     '<div class="note" style="margin-top:5px">' + sched + (s.cronActive ? '' : ' · <b>โปรเซสนี้ไม่ได้รัน cron</b> (เปิดด้วย --setup) — ตารางเวลาทำงานเมื่อรัน npm start') + '</div>' + jobs;
 }
 async function refreshStatus(){
@@ -577,7 +589,7 @@ function startSetup(opts = {}) {
       if (req.method === 'GET' && req.url === '/api/status') {
         const c = readCurrent();
         return json(res, 200, {
-          ok: true, running: isRunning(), cronActive,
+          ok: true, running: isRunning(), progress: getProgress(), cronActive,
           hasConfig: !!(fs.existsSync(CONFIG_PATH) && c.hospitalCode),
           hospitalCode: c.hospitalCode, hospitalName: c.hospitalName,
           schedule: c.schedule, jobs: (loadState().jobs || {}),

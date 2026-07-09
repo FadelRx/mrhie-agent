@@ -105,12 +105,15 @@ async function runOneJob(conn, cfg, pack, state, forceFull) {
   console.log(`[agent] job=${job} v${pack.version ?? '?'}  mode=${mode}  ตั้งแต่=${since}`);
 
   const mapLimit = makeMapLimit(cfg.sync && cfg.sync.concurrency || 4);
-  const { items, total, errors, skipped } = await runJob(conn, pack, cfg, since, mapLimit, cfg._maxKeys);
+  progress = { job, phase: 'build', done: 0, total: 0 };
+  const { items, total, errors, skipped } = await runJob(conn, pack, cfg, since, mapLimit, cfg._maxKeys,
+    (done, all) => { progress = { job, phase: 'build', done, total: all }; });
   console.log(`[agent] job=${job} keys=${total} build_errors=${errors} skipped=${skipped} -> push ${items.length}`);
 
   // push เป็น batch — ล้มชั่วคราว (network/429/5xx เช่นชนกับ รพ. อื่นที่ส่งเวลาเดียวกัน) จะ retry ให้
   const size = (cfg.sync && cfg.sync.batchSize) || 200;
   let pushed = 0, ingested = 0, pushFailed = false;
+  progress = { job, phase: 'push', done: 0, total: items.length };
   for (let i = 0; i < items.length; i += size) {
     const batch = items.slice(i, i + size);
     try {
@@ -121,6 +124,7 @@ async function runOneJob(conn, cfg, pack, state, forceFull) {
       pushFailed = true;
       console.error(`[agent] job=${job} push batch ${Math.floor(i / size)} failed: ${e.message}`);
     }
+    progress = { job, phase: 'push', done: Math.min(i + size, items.length), total: items.length };
   }
   // Hub รับเข้าไม่ครบ (เช่น DB คอขวดตอนหลาย รพ. ส่งพร้อมกัน — item error แต่ HTTP ตอบ 200)
   // ถือว่ารอบนี้ล้มด้วย: ไม่เลื่อน watermark ให้ส่งซ้ำรอบหน้า (hub upsert อยู่แล้ว ส่งซ้ำไม่มีผลเสีย)
@@ -153,6 +157,11 @@ async function runOneJob(conn, cfg, pack, state, forceFull) {
 let running = false;
 const isRunning = () => running;
 
+// ความคืบหน้าของรอบที่กำลังรัน (ให้หน้า UI วาดแถบ) — null = ไม่มีรอบค้าง
+//   { job, phase: 'build' (ดึง/ประกอบจาก HOSxP) | 'push' (ส่งขึ้น Hub), done, total }
+let progress = null;
+const getProgress = () => progress;
+
 async function runSync(cfg, forceFull, onlyJob) {
   if (running) { console.warn('[agent] มีรอบ sync กำลังทำงานอยู่ — ข้ามรอบนี้'); return false; }
   running = true;
@@ -182,11 +191,12 @@ async function runSync(cfg, forceFull, onlyJob) {
     return true;
   } finally {
     running = false;
+    progress = null;
   }
 }
 
 module.exports = {
-  runSync, isRunning, connectHosxp,
+  runSync, isRunning, getProgress, connectHosxp,
   loadState, saveState, computeCutoff, makeMapLimit,
   STATE_PATH, PACK_PATH,
 };
