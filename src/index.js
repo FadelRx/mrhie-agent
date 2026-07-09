@@ -15,7 +15,7 @@
 // ============================================================================
 const cron = require('node-cron');
 const { runSync } = require('./sync');
-const { loadConfig } = require('./config');
+const { loadConfig, defaultCron } = require('./config');
 
 (async () => {
   // หน้าตั้งค่าผ่านเว็บ — ไม่ต้องมี config ครบก็เปิดได้ (ไว้กรอกค่าครั้งแรก)
@@ -37,7 +37,7 @@ const { loadConfig } = require('./config');
     process.exit(0);
   }
 
-  const expr = (cfg.schedule && cfg.schedule.cron) || '0 3 * * *';
+  const expr = (cfg.schedule && cfg.schedule.cron) || defaultCron(cfg.hospitalCode);
   console.log(`[agent] scheduled: ${expr}  (--once = รันทันที, --full = sync เต็ม, --job <name> = เฉพาะงาน)`);
   cron.schedule(expr, () => runSync(cfg, false, onlyJob).catch(e => console.error('[agent] sync error:', e.message)));
 

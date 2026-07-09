@@ -78,6 +78,23 @@ async function connectHosxp(cfg) {
   return conn;
 }
 
+// ---------- push พร้อม retry ----------
+// retry เฉพาะที่มีโอกาสหายเอง: network error / 429 (rate limit) / 5xx — 4xx อื่น (key ผิด,
+// batch ใหญ่เกิน) retry ไปก็ล้มเหมือนเดิม. backoff ช่วยคลายจังหวะชนกับ รพ. อื่นที่ส่งเวลาเดียวกัน
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function pushWithRetry(hub, hospitalCode, job, batch) {
+  const waits = [5000, 15000, 45000];
+  for (let a = 0; ; a++) {
+    try { return await pushItems(hub, hospitalCode, job, batch); }
+    catch (e) {
+      const retryable = !e.status || e.status === 429 || e.status >= 500;
+      if (!retryable || a >= waits.length) throw e;
+      console.warn(`[agent] push ล้ม (${e.message}) — ลองใหม่ใน ${waits[a] / 1000} วิ (ครั้งที่ ${a + 1}/${waits.length})`);
+      await sleep(waits[a]);
+    }
+  }
+}
+
 // ---------- รัน job เดียวจนจบ (driver -> per key -> push) ----------
 async function runOneJob(conn, cfg, pack, state, forceFull) {
   const job = pack.job || 'default';
@@ -91,19 +108,25 @@ async function runOneJob(conn, cfg, pack, state, forceFull) {
   const { items, total, errors, skipped } = await runJob(conn, pack, cfg, since, mapLimit, cfg._maxKeys);
   console.log(`[agent] job=${job} keys=${total} build_errors=${errors} skipped=${skipped} -> push ${items.length}`);
 
-  // push เป็น batch
-  const size = (cfg.sync && cfg.sync.batchSize) || 50;
+  // push เป็น batch — ล้มชั่วคราว (network/429/5xx เช่นชนกับ รพ. อื่นที่ส่งเวลาเดียวกัน) จะ retry ให้
+  const size = (cfg.sync && cfg.sync.batchSize) || 200;
   let pushed = 0, ingested = 0, pushFailed = false;
   for (let i = 0; i < items.length; i += size) {
     const batch = items.slice(i, i + size);
     try {
-      const r = await pushItems(cfg.hub, cfg.hospitalCode, job, batch);
+      const r = await pushWithRetry(cfg.hub, cfg.hospitalCode, job, batch);
       pushed += batch.length; ingested += (r.ingested || 0);
       if (r.errors && r.errors.length) console.warn(`[agent] job=${job} hub errors:`, r.errors.slice(0, 3));
     } catch (e) {
       pushFailed = true;
       console.error(`[agent] job=${job} push batch ${Math.floor(i / size)} failed: ${e.message}`);
     }
+  }
+  // Hub รับเข้าไม่ครบ (เช่น DB คอขวดตอนหลาย รพ. ส่งพร้อมกัน — item error แต่ HTTP ตอบ 200)
+  // ถือว่ารอบนี้ล้มด้วย: ไม่เลื่อน watermark ให้ส่งซ้ำรอบหน้า (hub upsert อยู่แล้ว ส่งซ้ำไม่มีผลเสีย)
+  if (!pushFailed && ingested < pushed) {
+    pushFailed = true;
+    console.warn(`[agent] job=${job} hub รับเข้า ${ingested}/${pushed} ไม่ครบ — ไม่เลื่อน watermark, รอบหน้าส่งซ้ำ`);
   }
   console.log(`[agent] job=${job} done  push=${pushed} ingested=${ingested}`);
 

@@ -20,7 +20,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const mysql = require('mysql2/promise');
-const { CONFIG_PATH, loadDotEnv, loadConfig } = require('./config');
+const { CONFIG_PATH, loadDotEnv, loadConfig, defaultCron } = require('./config');
 const { runJob } = require('./runner');
 const { fetchPacks } = require('./pack');
 const { pushItems } = require('./push');
@@ -48,9 +48,9 @@ function readCurrent() {
     hosxp: { host: hosxp.host || '', port: hosxp.port || 3306, user: hosxp.user || '', database: hosxp.database || 'hos' },
     sync: {
       mode: sync.mode || 'incremental', sinceDays: sync.sinceDays ?? 180, overlapDays: sync.overlapDays ?? 2,
-      batchSize: sync.batchSize ?? 50, concurrency: sync.concurrency ?? 4,
+      batchSize: sync.batchSize ?? 200, concurrency: sync.concurrency ?? 4,
     },
-    schedule: { enabled: !!schedule.enabled, cron: schedule.cron || '0 3 * * *' },
+    schedule: { enabled: !!schedule.enabled, cron: schedule.cron || defaultCron(cfg.hospitalCode) },
     hasHubKey, hasHosxpPwd,
     _raw: cfg,   // เก็บไว้ merge ตอนเซฟ (กัน overrides/config/labCodes หาย)
   };
@@ -93,10 +93,10 @@ function save(input) {
     mode: input.sync.mode === 'full' ? 'full' : 'incremental',
     sinceDays: Number(input.sync.sinceDays) || 180,
     overlapDays: num(input.sync.overlapDays, 2),
-    batchSize: Number(input.sync.batchSize) || 50,
+    batchSize: Number(input.sync.batchSize) || 200,
     concurrency: Number(input.sync.concurrency) || 4,
   };
-  cur.schedule = { ...(cur.schedule || {}), enabled: !!input.schedule.enabled, cron: String(input.schedule.cron || '0 3 * * *').trim() };
+  cur.schedule = { ...(cur.schedule || {}), enabled: !!input.schedule.enabled, cron: String(input.schedule.cron || '').trim() || defaultCron(cur.hospitalCode) };
   cur.overrides = cur.overrides || {}; cur.config = cur.config || {}; cur.labCodes = cur.labCodes || {};
 
   fs.writeFileSync(CONFIG_PATH, JSON.stringify(cur, null, 2) + '\n');
@@ -193,7 +193,7 @@ async function testSync(input) {
         mode: inSync.mode === 'full' ? 'full' : 'incremental',
         sinceDays: Number(inSync.sinceDays) || 180,
         overlapDays: num(inSync.overlapDays, 2),
-        batchSize: Number(inSync.batchSize) || 50,
+        batchSize: Number(inSync.batchSize) || 200,
         concurrency: Number(inSync.concurrency) || 4,
       },
     };
@@ -230,7 +230,7 @@ async function testSync(input) {
       const avgBytes = items.length ? sampleBytes / items.length : 0;
       const buildRatio = total ? items.length / total : 0;   // สัดส่วนที่ส่งได้จริง (หัก skip/error)
       const estItems = Math.round(driverTotal * buildRatio);
-      const batchSize = cfg.sync.batchSize || 50;
+      const batchSize = cfg.sync.batchSize || 200;
 
       const r = {
         job, version: pack.version ?? null, mode, since,
@@ -389,7 +389,7 @@ function page() {
       <h2><span class='stepnum'>4</span> ตารางเวลา &amp; บันทึก ${badge(step4Done, 'เปิดอัตโนมัติแล้ว', 'ยังไม่เปิดอัตโนมัติ')}</h2>
       <div class='chk'><input type='checkbox' id='sched_enabled' ${c.schedule.enabled ? 'checked' : ''}><label style='margin:0'>เปิดรันอัตโนมัติตามเวลา</label></div>
       <label>cron expression</label><input id='sched_cron' value='${esc(c.schedule.cron)}' placeholder='0 3 * * *'>
-      <p class='note'>ค่าเริ่มต้น 0 3 * * * = ทุกวัน 03:00 น. (เวลาเครื่อง). ปิดสวิตช์ = รันเองด้วยปุ่ม ▶ ในแท็บสถานะ หรือ <span class='note'>npm run once</span></p>
+      <p class='note'>ค่าเริ่มต้น = ทุกวันช่วงตี 3 โดย<b>สุ่มนาทีคงที่ตามรหัส รพ.</b> (กันทุก รพ. ส่งเข้า Hub วินาทีเดียวกัน). ปิดสวิตช์ = รันเองด้วยปุ่ม ▶ ในแท็บสถานะ หรือ <span class='note'>npm run once</span></p>
       <details>
         <summary>ขั้นสูง — ค่าการ sync (ปกติไม่ต้องแก้)</summary>
         <div class='row' style='margin-top:8px'>

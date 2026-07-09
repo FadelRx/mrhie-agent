@@ -53,4 +53,11 @@ function loadConfig(tag = 'agent', opts = {}) {
   return cfg;
 }
 
-module.exports = { loadConfig, loadDotEnv, CONFIG_PATH };
+// cron เริ่มต้น: นาทีกระจายตามรหัส รพ. (คงที่ต่อ รพ.) — กันทุก รพ. ยิงเข้า Hub ตอน 03:00 พร้อมกัน
+function defaultCron(hospitalCode) {
+  let h = 0;
+  for (const c of String(hospitalCode || '')) h = (h * 31 + c.charCodeAt(0)) % 60;
+  return `${h} 3 * * *`;
+}
+
+module.exports = { loadConfig, loadDotEnv, CONFIG_PATH, defaultCron };

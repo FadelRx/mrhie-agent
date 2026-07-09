@@ -22,7 +22,7 @@
     "mode": "incremental",
     "sinceDays": 180,
     "overlapDays": 2,
-    "batchSize": 50,
+    "batchSize": 200,
     "concurrency": 4,
     "comment": "ค่า default ใช้กับทุกงาน (job) — แต่ละ pack ระบุ sync ของตัวเองทับได้ที่ Hub. mode=incremental: รอบถัดไป sync เฉพาะคนที่มี movement ใหม่ตั้งแต่รอบก่อน. รอบแรก/--full ดึงย้อนหลัง sinceDays วัน. overlapDays = เผื่อย้อนกลับกันข้อมูลแก้/จำหน่ายล่าช้า"
   },

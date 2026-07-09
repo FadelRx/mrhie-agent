@@ -11,7 +11,11 @@ async function pushItems(hub, hospitalCode, job, items) {
   });
   const text = await res.text();
   let body; try { body = JSON.parse(text); } catch { body = { raw: text }; }
-  if (!res.ok) throw new Error(`hub ${res.status}: ${body.error || text}`);
+  if (!res.ok) {
+    const err = new Error(`hub ${res.status}: ${body.error || text}`);
+    err.status = res.status;   // ให้ผู้เรียกตัดสินใจ retry ได้ (429/5xx = ชั่วคราว, 4xx อื่น = ถาวร)
+    throw err;
+  }
   return body;
 }
 
