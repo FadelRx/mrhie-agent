@@ -1,0 +1,25 @@
+services:
+  agent:
+    build: .
+    # สร้าง config เริ่มต้นเฉพาะครั้งแรกที่ volume ยังว่าง เพื่อให้หน้า setup เปิดได้
+    command: >
+      sh -c 'test -f /data/config.json || cp /app/config.example.json /data/config.json;
+      exec node src/index.js'
+    environment:
+      # ใน container ต้อง bind ทุก interface; เครื่อง host เปิดให้เฉพาะ localhost ด้านล่าง
+      SETUP_HOST: 0.0.0.0
+      SETUP_PORT: 7070
+      # เก็บค่า setup, secret, cache pack และสถานะ sync ไว้ใน named volume
+      AGENT_CONFIG: /data/config.json
+      AGENT_ENV: /data/.env
+      AGENT_PACK: /data/.query-pack.json
+      AGENT_STATE: /data/.sync-state.json
+    ports:
+      # หน้าตั้งค่า/สถานะสำหรับเครื่องที่ติดตั้ง agent เท่านั้น
+      - "7070:7070"
+    volumes:
+      - agent_data:/data
+    restart: unless-stopped
+
+volumes:
+  agent_data:
