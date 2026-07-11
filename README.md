@@ -2,6 +2,10 @@
 
 ตัว sync ของระบบตามยาเดิมข้ามโรงพยาบาล (Med Reconciliation HIE): ดึงนิยามงาน (query pack) จาก Hub → อ่านข้อมูลจาก HOSxP slave/replica (read-only) → push ขึ้น Hub ผ่าน HTTPS
 
+agent ทำงาน **2 ขา** พร้อมกันเมื่อรัน `npm start`:
+1. **Batch (ตาม cron)** — ดึง *ดัชนี* visit + จำนวนยา (med_count) push เก็บที่ Hub (Hub ไม่เก็บตัวยา/lab จริง — federated)
+2. **On-demand (WebSocket)** — เปิด WS ค้างออกไปหา Hub (ทะลุ NAT — ไม่ต้องมี public IP/เปิดพอร์ต) รอรับคำสั่ง "ดึงสด" ตอนแพทย์เปิดดูคนไข้ → query HOSxP เฉพาะ visit ที่ขอ → เข้ารหัส E2E ส่งกลับ → **ไม่เก็บที่ Hub** (ใช้ `hub.url`/`hub.apiKey` ตัวเดียวกับ batch — ไม่ต้องตั้งค่าเพิ่ม)
+
 > ระบบนี้แยกเป็น 3 repo:
 > - [`mrhie-hub`](https://github.com/FadelRx/mrhie-hub) — เซิร์ฟเวอร์กลาง (API + ฐานข้อมูล) ติดตั้งที่ สสจ./รพ.แม่ข่าย ที่เดียว
 > - **`mrhie-agent`** (repo นี้) — ตัว sync ติดตั้งที่ทุก รพ.
@@ -15,11 +19,13 @@
 npm install
 
 npm run setup    # ★ เปิดหน้าตั้งค่าผ่านเว็บ http://127.0.0.1:7070 — wizard 4 ขั้น + ทดสอบเชื่อมต่อ/ทดสอบส่งข้อมูล
-npm run once     # ทดสอบ sync รอบเดียว
-npm start        # รันค้างไว้ตาม cron + เปิดหน้าสถานะที่ http://127.0.0.1:7070 (ดูผล sync/กดสั่งรัน/แก้ค่า)
+npm run once     # ทดสอบ sync รอบเดียว (batch อย่างเดียว ไม่เปิด WS)
+npm start        # ★ รันจริง: cron + WS on-demand + หน้าสถานะ/ตั้งค่าที่ :7070 — ผ่าน supervisor (run.js) ที่ respawn ให้อัตโนมัติ
 ```
 
-**`npm run setup`** เปิดหน้าเว็บ (local) 2 แท็บ: **⚙️ ตั้งค่า** เป็น wizard 4 ขั้น — ① โรงพยาบาล & Hub (วาง API key ที่ได้จากผู้ดูแล Hub + ทดสอบเชื่อมต่อ = activate) → ② HOSxP (ทดสอบ connect จริง) → ③ **ทดสอบส่งข้อมูล (dry-run)** ดึงข้อมูลจริงจำนวนตัวอย่างมาโชว์ว่า *จะส่ง dataset อะไร กี่แถว ขนาดรวมประมาณเท่าไหร่ กี่ batch* โดยไม่ส่งขึ้น Hub (ติ๊ก "ส่งจริง 1 batch" เพื่อพิสูจน์ครบวงจรได้) → ④ ตารางเวลา + 💾 บันทึก (เขียน `config.json` + `.env` ให้เอง) และ **📊 สถานะ** — ผล sync ล่าสุดราย job, ปุ่ม **▶ Sync ตอนนี้**, log ล่าสุด. หน้าเดียวกันนี้เปิดค้างอยู่ตลอดเมื่อรัน `npm start`. ค่าเริ่มต้นผูกกับ `127.0.0.1`; ถ้าต้องเข้าจากเครื่องอื่นใน LAN ใช้ `npm run setup -- --host 0.0.0.0 --port 8090` (เฉพาะวงปิดที่เชื่อถือได้)
+> **`npm start` รันผ่าน `run.js` (supervisor)** — ถ้า agent ปิด/crash หรือกด **🔄 รีสตาร์ท** ในหน้า UI มันจะเปิดใหม่ให้เอง (โหลด `config.json`/`.env` ใหม่ทุกครั้ง — ไม่มีปัญหาค่าเก่าค้าง). ถ้าอยากรันตรงไม่ผ่าน supervisor ใช้ `npm run start:direct` (ปุ่มรีสตาร์ทจะแค่ปิด ไม่เปิดเอง)
+
+**`npm run setup`** เปิดหน้าเว็บ (local) 2 แท็บ: **⚙️ ตั้งค่า** เป็น wizard 4 ขั้น — ① โรงพยาบาล & Hub (วาง API key ที่ได้จากผู้ดูแล Hub + ทดสอบเชื่อมต่อ = activate) → ② HOSxP (ทดสอบ connect จริง) → ③ **ทดสอบส่งข้อมูล (dry-run)** ดึงข้อมูลจริงจำนวนตัวอย่างมาโชว์ว่า *จะส่ง dataset อะไร กี่แถว ขนาดรวมประมาณเท่าไหร่ กี่ batch* โดยไม่ส่งขึ้น Hub (ติ๊ก "ส่งจริง 1 batch" เพื่อพิสูจน์ครบวงจรได้) → ④ ตารางเวลา + 💾 บันทึก (เขียน `config.json` + `.env` ให้เอง) และ **📊 สถานะ** — ผล sync ล่าสุดราย job, ปุ่ม **▶ Sync ตอนนี้**, ปุ่ม **🔄 รีสตาร์ท agent** (โหลด config ใหม่ทันทีเมื่อรันผ่าน `npm start` — ไม่ต้องแตะ terminal), log ล่าสุด. หน้าเดียวกันนี้เปิดค้างอยู่ตลอดเมื่อรัน `npm start`. ค่าเริ่มต้นผูกกับ `127.0.0.1`; ถ้าต้องเข้าจากเครื่องอื่นใน LAN ใช้ `npm run setup -- --host 0.0.0.0 --port 8090` (เฉพาะวงปิดที่เชื่อถือได้)
 
 **การขอ API key มีทางเดียว:** ผู้ดูแล Hub ออก key (เว็บจัดการระบบ → โรงพยาบาล → "ออก API key", แสดงครั้งเดียว) ส่งให้ รพ. → รพ. วาง key ในหน้า setup ขั้น ① แล้วกด "📡 ทดสอบเชื่อมต่อ Hub" เพื่อ activate → บันทึก (key ถูกเขียนลง `.env` ให้เอง). Hub เป็น root of trust: หมุน key/ปิด รพ. ได้ทุกเมื่อ + บันทึก access_log
 
@@ -46,6 +52,23 @@ node src/index.js --once          # sync ตามโหมด (incremental ถ�
 node src/index.js --full          # บังคับ sync เต็มย้อนหลัง sinceDays (เช่นหลังเพิ่งติดตั้ง/กู้ข้อมูล)
 node src/index.js --job medrecon  # รันเฉพาะบางงาน (job)
 ```
+
+## รันจริงที่ รพ. (auto-start / auto-restart)
+
+agent ต้องรันค้าง 24/7 และเปิดเองหลังเครื่องรีบูต — เอา `run.js` (supervisor) ไปทำเป็น service:
+
+```powershell
+# Windows — ด้วย nssm (https://nssm.cc): ชี้ไปที่ node run.js
+nssm install mrhie-agent "C:\Program Files\nodejs\node.exe" "C:\path\to\mrhie-agent\run.js"
+nssm set mrhie-agent AppDirectory "C:\path\to\mrhie-agent"
+nssm start mrhie-agent
+```
+```bash
+# หรือ pm2 (ข้ามแพลตฟอร์ม)
+pm2 start run.js --name mrhie-agent && pm2 save && pm2 startup
+```
+
+เมื่อรันแบบนี้ ปุ่ม **🔄 รีสตาร์ท** ในหน้า UI (:7070) จะสั่งให้โปรเซสออกแล้ว supervisor/pm2 เปิดใหม่ให้เอง (อ่าน config/.env ใหม่หมด) — เจ้าหน้าที่แก้ค่าแล้วใช้ได้เลยโดยไม่ต้องเข้า terminal
 
 ## หมายเหตุทางเทคนิค
 

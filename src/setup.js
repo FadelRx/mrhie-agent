@@ -335,8 +335,10 @@ function page() {
       <div id='status_body' class='note'>กำลังโหลด...</div>
       <div style='display:flex;gap:12px;margin-top:16px;align-items:center;flex-wrap:wrap'>
         <button id='btn_sync' onclick='syncNow()'>▶ Sync ตอนนี้</button>
+        <button class='ghost' id='btn_restart' onclick='restartAgent()'>🔄 รีสตาร์ท agent</button>
         <label class='chk' style='margin:0;font-weight:400;font-size:12.5px'><input type='checkbox' id='sync_full_chk'> sync เต็ม (ย้อนหลังตามที่ตั้งไว้ ไม่ใช่เฉพาะที่เปลี่ยน)</label>
       </div>
+      <p class='note' id='restart_hint' style='margin-top:6px'>กด 🔄 หลังบันทึกการตั้งค่า เพื่อโหลดค่าใหม่ทันที (ต้องรันด้วย <b>npm start</b> จึงจะกลับมาเองอัตโนมัติ)</p>
       <div id='st_sync' class='status'></div>
     </div>
     <div class='card'>
@@ -454,7 +456,7 @@ async function saveAll(){
   try {
     const r = await fetch('/api/save', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(collect()) });
     const j = await r.json();
-    if (j.ok){ show(el, 'ok', '✅ บันทึกแล้ว — รีสตาร์ท agent เพื่อใช้ค่าใหม่'); $('hosxp_password').value=''; $('hub_apiKey').value=''; }
+    if (j.ok){ show(el, 'ok', '✅ บันทึกแล้ว — ไปแท็บ 📊 สถานะ กด 🔄 รีสตาร์ท agent เพื่อใช้ค่าใหม่'); $('hosxp_password').value=''; $('hub_apiKey').value=''; }
     else show(el, 'bad', '⚠️ ' + (j.message || 'บันทึกไม่สำเร็จ'));
   } catch(e){ show(el, 'bad', '⚠️ บันทึกไม่ได้: ' + e.message); }
 }
@@ -559,6 +561,22 @@ async function syncNow(){
     refreshStatus();
   } catch(e){ show(el, 'bad', '⚠️ ' + e.message); }
 }
+async function restartAgent(){
+  const el = $('st_sync');
+  if (!confirm('รีสตาร์ท agent เพื่อโหลด config ใหม่?')) return;
+  show(el, 'run', 'กำลังรีสตาร์ท agent...');
+  try { await fetch('/api/restart', { method:'POST' }); } catch(e){}   // โปรเซสจะดับ -> fetch อาจ error เป็นเรื่องปกติ
+  // รอโปรเซสใหม่ขึ้น (supervisor respawn) แล้วเช็คว่ากลับมาหรือยัง
+  var tries = 0;
+  var poll = setInterval(async function(){
+    tries++;
+    try {
+      var s = await (await fetch('/api/status')).json();
+      if (s && s.ok) { clearInterval(poll); show(el, 'ok', '✅ agent กลับมาแล้ว (โหลด config ใหม่เรียบร้อย)'); refreshStatus(); }
+    } catch(e){}
+    if (tries > 20) { clearInterval(poll); show(el, 'bad', '⚠️ ยังไม่กลับมาใน ~20s — ถ้าไม่ได้รันด้วย npm start (supervisor) ต้องเปิด agent ใหม่เอง'); }
+  }, 1000);
+}
 
 showTab('${startTab}');
 refreshStatus();
@@ -592,6 +610,7 @@ function startSetup(opts = {}) {
         const c = readCurrent();
         return json(res, 200, {
           ok: true, running: isRunning(), progress: getProgress(), cronActive,
+          supervised: !!process.env.AGENT_SUPERVISED,   // true = รันใต้ run.js -> ปุ่มรีสตาร์ทจะ respawn ให้เอง
           hasConfig: !!(fs.existsSync(CONFIG_PATH) && c.hospitalCode),
           hospitalCode: c.hospitalCode, hospitalName: c.hospitalName,
           schedule: c.schedule, jobs: (loadState().jobs || {}),
@@ -606,6 +625,13 @@ function startSetup(opts = {}) {
         // fire-and-forget: ตามผลจาก /api/status + /api/logs
         runSync(cfg, !!body.full).catch(e => console.error('[agent] sync error:', e.message));
         return json(res, 200, { ok: true, message: 'เริ่ม sync แล้ว — ตามความคืบหน้าได้จาก Log ด้านล่าง' });
+      }
+      // รีสตาร์ท agent: ตอบก่อนแล้วออกด้วย exit 0 — ถ้ารันใต้ run.js (supervisor) จะ spawn ใหม่ให้ (อ่าน config/.env ใหม่หมด)
+      if (req.method === 'POST' && req.url === '/api/restart') {
+        json(res, 200, { ok: true, supervised: !!process.env.AGENT_SUPERVISED });
+        console.log('[setup] รับคำสั่งรีสตาร์ทจาก UI — ออกด้วย exit 0' + (process.env.AGENT_SUPERVISED ? ' (supervisor จะเริ่มใหม่)' : ' (ไม่มี supervisor — ต้องเปิดเอง)'));
+        setTimeout(() => process.exit(0), 250);   // เผื่อเวลาให้ response ส่งเสร็จก่อน
+        return;
       }
       if (req.method === 'POST' && req.url === '/api/test-hosxp') return json(res, 200, await testHosxp(await readBody(req)));
       if (req.method === 'POST' && req.url === '/api/test-hub')   return json(res, 200, await testHub(await readBody(req)));

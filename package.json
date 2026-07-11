@@ -5,7 +5,8 @@
   "type": "commonjs",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js",
+    "start": "node run.js",
+    "start:direct": "node src/index.js",
     "once": "node src/index.js --once",
     "setup": "node src/index.js --setup",
     "explain": "node src/explain.js"
