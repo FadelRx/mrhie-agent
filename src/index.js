@@ -16,6 +16,7 @@
 const cron = require('node-cron');
 const { runSync } = require('./sync');
 const { loadConfig, defaultCron } = require('./config');
+const { startWsClient } = require('./wsclient');
 
 (async () => {
   // หน้าตั้งค่าผ่านเว็บ — ไม่ต้องมี config ครบก็เปิดได้ (ไว้กรอกค่าครั้งแรก)
@@ -40,6 +41,10 @@ const { loadConfig, defaultCron } = require('./config');
   const expr = (cfg.schedule && cfg.schedule.cron) || defaultCron(cfg.hospitalCode);
   console.log(`[agent] scheduled: ${expr}  (--once = รันทันที, --full = sync เต็ม, --job <name> = เฉพาะงาน)`);
   cron.schedule(expr, () => runSync(cfg, false, onlyJob).catch(e => console.error('[agent] sync error:', e.message)));
+
+  // ท่อ on-demand: ต่อ WS ค้างไปหา hub รอรับคำสั่งดึงข้อมูลสด (ทะลุ NAT — agent ต่อออกเสมอ)
+  if (cfg.hub && cfg.hub.url && cfg.hub.apiKey) startWsClient(cfg);
+  else console.warn('[agent] ข้าม WS: ยังไม่ได้ตั้ง hub.url / hub.apiKey');
 
   // เปิดหน้าสถานะ/ตั้งค่าค้างไว้ด้วย (ผูก 127.0.0.1 เป็น default) — เจ้าหน้าที่ดูผล sync/สั่งรันได้โดยไม่ต้องใช้ terminal
   require('./setup').startSetup({ cronActive: true });

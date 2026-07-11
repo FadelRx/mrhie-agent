@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "mysql2": "^3.9.7",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "ws": "^8.21.0"
   }
 }
