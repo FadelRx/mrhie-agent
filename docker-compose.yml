@@ -10,6 +10,7 @@ services:
       # ใน container ต้อง bind ทุก interface; เครื่อง host เปิดให้เฉพาะ localhost ด้านล่าง
       SETUP_HOST: 0.0.0.0
       SETUP_PORT: 7070
+      TZ: Asia/Bangkok
       # เก็บค่า setup, secret, cache pack และสถานะ sync ไว้ใน named volume
       AGENT_CONFIG: /data/config.json
       AGENT_ENV: /data/.env
