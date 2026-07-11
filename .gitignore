@@ -5,3 +5,4 @@ config.json
 .query-pack.json
 *.log
 .DS_Store
+.hub-key.json
