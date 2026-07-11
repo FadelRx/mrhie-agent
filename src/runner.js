@@ -68,7 +68,8 @@ function depsOf(ds, names) {
 }
 
 // ---------- รัน datasets ทั้งหมดของ key หนึ่ง (เป็น wave ตาม dependency เพื่อรันขนาน) ----------
-async function runPerKey(conn, ctx, perKey, key, since) {
+// req = ค่า runtime ที่ผู้เรียกส่งเพิ่ม (เช่น on-demand ส่ง { opdVns, ipdAns } ให้ bind $req.* ใช้) — batch ไม่ส่ง (undefined)
+async function runPerKey(conn, ctx, perKey, key, since, req) {
   const names = new Set(perKey.map(d => d.name));
   const prev = {};                              // ชื่อ dataset -> rows (ไว้ให้ bind อ้างถึง)
   const pending = new Map(perKey.map(d => [d.name, d]));
@@ -77,7 +78,7 @@ async function runPerKey(conn, ctx, perKey, key, since) {
     const ready = [...pending.values()].filter(d => [...depsOf(d, names)].every(n => n in prev));
     if (!ready.length) throw new Error(`pack '${ctx.pack.job}': datasets มี dependency วน (${[...pending.keys()].join(', ')})`);
     await Promise.all(ready.map(async (ds) => {
-      const binds = resolveBinds(ds.bind, { key, since, cfg: ctx.cfg, prev });
+      const binds = resolveBinds(ds.bind, { key, since, cfg: ctx.cfg, prev, req });
       prev[ds.name] = await runDataset(conn, ctx, ds, binds);
       pending.delete(ds.name);
     }));
@@ -129,4 +130,5 @@ async function runJob(conn, pack, cfg, since, mapLimit, maxKeys, onProgress) {
   return { items, total: keys.length, errors, skipped, driverTotal };
 }
 
-module.exports = { runJob, buildContext };
+// export runPerKey ให้ช่อง on-demand (ondemand.js) เรียกดึง detail ราย cid ได้โดยไม่ต้องรัน driver
+module.exports = { runJob, buildContext, runPerKey };

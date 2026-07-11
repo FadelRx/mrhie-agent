@@ -205,12 +205,14 @@ async function testSync(input) {
     const sample = Math.min(Math.max(parseInt(input.sample, 10) || 20, 1), 200);
     const state = loadState();
     const { packs, source } = await fetchPacks(cfg, PACK_PATH);
-    if (!packs.length) return { ok: false, message: 'Hub ไม่มีงาน (query pack) ที่ active' };
+    // ข้าม pack on-demand (WS) — หน้าทดสอบนี้ทดสอบเฉพาะ flow "ดึงมาเก็บ" (batch) เท่านั้น
+    const batchJobs = packs.filter(p => !p.on_demand);
+    if (!batchJobs.length) return { ok: false, message: 'Hub ไม่มีงาน batch (query pack ที่ active เป็น on-demand ล้วน) — publish pack เก็บ index เช่น medrecon' };
 
     conn = await connectHosxp(cfg);
     const mapLimit = makeMapLimit(cfg.sync.concurrency || 4);
     const results = [];
-    for (const pack of packs) {
+    for (const pack of batchJobs) {
       const job = pack.job || 'default';
       const jobState = (state.jobs && state.jobs[job]) || {};
       // ใช้ cutoff เดียวกับรอบ sync จริงรอบถัดไป — ตัวเลขที่เห็น = สิ่งที่จะเกิดจริง

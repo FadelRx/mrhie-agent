@@ -9,6 +9,8 @@
 //  Phase 2 จะเติม handler สำหรับ {t:'fetch'} -> รัน on-demand pack -> ตอบ {t:'result', enc}
 // ============================================================================
 const WebSocket = require('ws');
+const { handleFetch } = require('./ondemand');
+const { getHubKey, encryptEnvelope } = require('./push');
 
 const VER = require('../package.json').version;
 const BACKOFF = [5000, 15000, 45000];   // reconnect backoff (ล้อเลียนกับ retry ของ push.js)
@@ -16,6 +18,21 @@ const BACKOFF = [5000, 15000, 45000];   // reconnect backoff (ล้อเลี
 // http(s)://hub  ->  ws(s)://hub/agent/ws
 function toWsUrl(hubUrl) {
   return String(hubUrl).replace(/\/+$/, '').replace(/^http/i, 'ws') + '/agent/ws';
+}
+
+// ตอบคำสั่ง fetch จาก hub: ดึง HOSxP สด -> เข้ารหัส E2E (เหมือน /api/ingest) -> ส่ง result กลับตาม rid
+//   ล้ม (HOSxP timeout / ดึงกุญแจไม่ได้ ฯลฯ) -> ส่ง {t:'error', rid} ให้ hub fallback cache ได้ทันที ไม่ต้องรอ timeout
+function onFetch(ws, cfg, m) {
+  handleFetch(cfg, m)
+    .then(async (data) => {
+      const { publicKey } = await getHubKey(cfg.hub, cfg.hospitalCode);
+      const enc = encryptEnvelope(publicKey, { cid: m.cid, data });
+      ws.send(JSON.stringify({ t: 'result', rid: m.rid, enc }));
+    })
+    .catch((e) => {
+      console.error(`[ws] fetch ${m.cid} ล้ม: ${e.message}`);
+      try { ws.send(JSON.stringify({ t: 'error', rid: m.rid, error: e.message })); } catch {}
+    });
 }
 
 function startWsClient(cfg) {
@@ -38,8 +55,8 @@ function startWsClient(cfg) {
 
     ws.on('message', (raw) => {
       let m; try { m = JSON.parse(raw.toString()); } catch { return; }
-      // Phase 1: ยังไม่มีคำสั่งให้ทำ — Phase 2 จะ handle m.t === 'fetch' (ดึง HOSxP -> ตอบ result)
-      void m;
+      if (m.t === 'fetch') onFetch(ws, cfg, m);
+      // (ping/pong จัดการโดย ws เอง — ไม่ต้อง handle ที่นี่)
     });
 
     // ws ตอบ pong ให้ ping ของ hub อัตโนมัติอยู่แล้ว — ไม่ต้องทำเอง

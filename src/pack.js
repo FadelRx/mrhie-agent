@@ -53,6 +53,8 @@ function resolveOne(spec, src) {
   const parts = spec.slice(1).split('.');
   const head = parts.shift();
   if (head === 'cfg') return getPath(src.cfg, parts);
+  // $req.* = ค่าที่ผู้เรียกส่งเข้ามาตอน runtime (เช่น on-demand ส่ง list visit_no ที่ hub ขอ) — $req.opdVns
+  if (head === 'req') return getPath(src.req, parts);
   // อ้างผลของ dataset ก่อนหน้า: $hn.hn -> rows ของ dataset 'hn' แถวแรก คอลัมน์ 'hn'
   const rows = src.prev[head];
   if (rows === undefined) throw new Error(`pack: bind อ้าง dataset '${head}' ที่ยังไม่ถูกรัน (ตรวจลำดับ/ชื่อ datasets ใน pack)`);

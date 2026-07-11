@@ -83,4 +83,5 @@ async function pushItems(hub, hospitalCode, job, items) {
   return body;
 }
 
-module.exports = { pushItems };
+// export getHubKey/encryptEnvelope ให้ช่อง on-demand (wsclient) reuse การเข้ารหัส E2E เดียวกัน
+module.exports = { pushItems, getHubKey, encryptEnvelope };

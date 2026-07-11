@@ -171,7 +171,8 @@ async function runSync(cfg, forceFull, onlyJob) {
 
     // ดึง jobs (packs) ทั้งหมดจาก Hub — Hub ล่มใช้ cache เดิม
     const { packs, source } = await fetchPacks(cfg, PACK_PATH);
-    let jobs = packs;
+    // pack ที่ตั้ง on_demand = ช่อง WS (ดึงสดตอนแพทย์เปิดดู) — ไม่เอามารัน/ push ในรอบ batch
+    let jobs = packs.filter(p => !p.on_demand);
     if (onlyJob) jobs = jobs.filter(p => (p.job || 'default') === onlyJob);
     console.log(`[agent] ${jobs.length} job(s) (${source}): ${jobs.map(p => `${p.job}v${p.version ?? '?'}`).join(', ') || '-'}`);
     if (!jobs.length) { console.warn('[agent] ไม่มี job ให้รัน'); return false; }
