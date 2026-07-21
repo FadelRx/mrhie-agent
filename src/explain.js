@@ -3,7 +3,7 @@
 //  ของแต่ละ รพ. เพื่อดูว่า "ใช้ index หรือวิ่งสแกนทั้งตาราง"
 //
 //  ใช้:  node src/explain.js                       (ดึง pack จาก Hub/cache)
-//        node src/explain.js --pack ../hub/packs/medrecon.json   (อ่าน pack จากไฟล์ ไม่พึ่ง Hub)
+//        node src/explain.js --pack ../hub/packs/medrecon-hos3.json  (อ่าน pack จากไฟล์ ไม่พึ่ง Hub — เลือกไฟล์ตามเวอร์ชัน HOSxP)
 //        node src/explain.js --job medrecon        (เฉพาะงาน)
 //        node src/explain.js --cid 1234567890123 --hn 999999     (กำหนดค่า bind เอง)
 //        node src/explain.js --since 2026-01-01    (กำหนดวัน cutoff ของ driver)

@@ -14,7 +14,7 @@ const mysql = require('mysql2/promise');
 const { renderSql, resolveBinds } = require('./pack');
 const { buildContext } = require('./runner');
 const { loadConfig } = require('./config');
-const PACK_PATH   = process.env.AGENT_PACK   || path.join(__dirname, '..', '..', 'hub', 'packs', 'medrecon.json');
+const PACK_PATH   = process.env.AGENT_PACK   || path.join(__dirname, '..', '..', 'hub', 'packs', 'medrecon-hos3.json');
 
 function arg(name, def) { const i = process.argv.indexOf(name); return i >= 0 ? process.argv[i + 1] : def; }
 const hr = () => { const t = process.hrtime.bigint(); return () => Number(process.hrtime.bigint() - t) / 1e6; };
