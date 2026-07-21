@@ -75,6 +75,7 @@ pm2 start run.js --name mrhie-agent && pm2 save && pm2 startup
 - **Agent เป็น generic runner (รองรับหลายงาน)**: agent **ไม่รู้จักโดเมนใด ๆ** — มันดึง "งาน (job)" ทั้งหมดที่ active จาก Hub (`GET /api/agent/pack`) มารัน driver → datasets แล้วส่ง raw rows กลับ. **เพิ่มงานใหม่ = เพิ่มที่ฝั่ง Hub เท่านั้น** — ไม่ต้องแก้/อัปเดต agent ที่ รพ.
 - **Query pack**: pack หนึ่ง = หนึ่งงาน บอก `driver` (ดึงรายการคีย์ เช่น CID) + `datasets` (ชุด SQL + การ bind พารามิเตอร์). agent cache ไว้ (`.query-pack.json`) เผื่อ Hub ล่ม
 - **HOSxP ต่างเวอร์ชัน**: ถ้า รพ. ใดชื่อ table/column ต่าง ตั้ง `overrides` (idents) และ/หรือ `config` ใน `config.json` ของ รพ. นั้นเอง — ดู [`docs/hosxp-overrides.md`](docs/hosxp-overrides.md)
+- **ยืนยัน login ด้วยรหัส HOSxP**: ท่อ WS เดียวกันยังรับคำสั่ง `auth` จาก hub — เจ้าหน้าที่ รพ. login เว็บด้วย**รหัส HOSxP เดิม**ได้ agent ตรวจกับตาราง `opduser` (เทียบ MD5 ที่ hub ส่งมากับคอลัมน์ `passweb` + เช็ค `account_disable`) แล้วตอบแค่ ok/ชื่อ — **ไม่รับ/ไม่เก็บรหัส plaintext** และอ่าน HOSxP อย่างเดียว
 - **รุ่นนี้** อ่านข้อมูลอย่างเดียว ไม่เขียนกลับ HOSxP
 
 ## License

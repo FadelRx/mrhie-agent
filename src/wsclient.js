@@ -9,7 +9,7 @@
 //  Phase 2 จะเติม handler สำหรับ {t:'fetch'} -> รัน on-demand pack -> ตอบ {t:'result', enc}
 // ============================================================================
 const WebSocket = require('ws');
-const { handleFetch } = require('./ondemand');
+const { handleFetch, handleAuth } = require('./ondemand');
 const { getHubKey, encryptEnvelope } = require('./push');
 
 const VER = require('../package.json').version;
@@ -35,6 +35,17 @@ function onFetch(ws, cfg, m) {
     });
 }
 
+// ตอบคำสั่ง auth จาก hub: ตรวจ HOSxP login (opduser.passweb) -> ส่งผล { ok, name } กลับตาม rid
+//   ไม่เข้ารหัส E2E: ผลลัพธ์ไม่มี PII (แค่ ok + ชื่อผู้ใช้) และรหัสส่งมาเป็น md5 อยู่แล้ว
+function onAuth(ws, cfg, m) {
+  handleAuth(cfg, m)
+    .then((r) => { try { ws.send(JSON.stringify({ t: 'result', rid: m.rid, ...r })); } catch {} })
+    .catch((e) => {
+      console.error(`[ws] auth ${m.loginname} ล้ม: ${e.message}`);
+      try { ws.send(JSON.stringify({ t: 'error', rid: m.rid, error: e.message })); } catch {}
+    });
+}
+
 function startWsClient(cfg) {
   const url = toWsUrl(cfg.hub.url);
   const hisType = (cfg.hosxp && cfg.hosxp.hisType) || 'hosxp';   // Phase 3 ค่อยแยก v3/v4
@@ -56,6 +67,7 @@ function startWsClient(cfg) {
     ws.on('message', (raw) => {
       let m; try { m = JSON.parse(raw.toString()); } catch { return; }
       if (m.t === 'fetch') onFetch(ws, cfg, m);
+      else if (m.t === 'auth') onAuth(ws, cfg, m);
       // (ping/pong จัดการโดย ws เอง — ไม่ต้อง handle ที่นี่)
     });
 
