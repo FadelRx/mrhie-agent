@@ -14,6 +14,9 @@ const { getHubKey, encryptEnvelope } = require('./push');
 
 const VER = require('../package.json').version;
 const BACKOFF = [5000, 15000, 45000];   // reconnect backoff (ล้อเลียนกับ retry ของ push.js)
+const HANDSHAKE_TIMEOUT_MS = 20000;       // กัน TCP/TLS handshake ค้างโดยไม่มี error/close
+const HUB_SILENCE_TIMEOUT_MS = 75000;     // hub ping ทุก 30 วิ — เงียบเกิน 75 วิถือว่าเป็น half-open
+const WATCHDOG_INTERVAL_MS = 15000;
 
 // http(s)://hub  ->  ws(s)://hub/agent/ws
 function toWsUrl(hubUrl) {
@@ -54,26 +57,50 @@ function startWsClient(cfg) {
 
   function connect() {
     if (stopped) return;
+    let watchdog = null;
+    let lastHubSignalAt = Date.now();
     const ws = new WebSocket(url, {
       headers: { 'Authorization': `Bearer ${cfg.hospitalCode}:${cfg.hub.apiKey}` },
+      handshakeTimeout: HANDSHAKE_TIMEOUT_MS,
     });
 
     ws.on('open', () => {
       attempt = 0;
+      lastHubSignalAt = Date.now();
       console.log(`[ws] connected to hub: ${url}`);
       ws.send(JSON.stringify({ t: 'hello', code: cfg.hospitalCode, his_type: hisType, ver: VER }));
+
+      // Hub ส่ง ping ทุก 30 วิ แต่บาง proxy อาจตัดขาฝั่ง Hub แล้วปล่อยขา Agent
+      // ค้างไว้โดยไม่ส่ง close (half-open). ถ้าไม่ได้ยินอะไรจาก Hub เกินกำหนด
+      // ให้ terminate เอง เพื่อบังคับเข้า flow close -> reconnect ด้านล่าง
+      watchdog = setInterval(() => {
+        const silentMs = Date.now() - lastHubSignalAt;
+        if (silentMs <= HUB_SILENCE_TIMEOUT_MS) return;
+        console.error(`[ws] hub silent ${Math.round(silentMs / 1000)}s — terminate stale connection`);
+        clearInterval(watchdog);
+        watchdog = null;
+        try { ws.terminate(); } catch {}
+      }, WATCHDOG_INTERVAL_MS);
+      if (watchdog.unref) watchdog.unref();
     });
 
     ws.on('message', (raw) => {
+      lastHubSignalAt = Date.now();
       let m; try { m = JSON.parse(raw.toString()); } catch { return; }
       if (m.t === 'fetch') onFetch(ws, cfg, m);
       else if (m.t === 'auth') onAuth(ws, cfg, m);
       // (ping/pong จัดการโดย ws เอง — ไม่ต้อง handle ที่นี่)
     });
 
-    // ws ตอบ pong ให้ ping ของ hub อัตโนมัติอยู่แล้ว — ไม่ต้องทำเอง
+    // ws ตอบ pong ให้ ping ของ hub อัตโนมัติ และใช้ ping เป็นสัญญาณว่าเส้นทาง
+    // Hub -> proxy -> Agent ยังเดินอยู่จริง (message อาจไม่มีนานหลายชั่วโมง)
+    ws.on('ping', () => { lastHubSignalAt = Date.now(); });
 
     ws.on('close', (code) => {
+      if (watchdog) {
+        clearInterval(watchdog);
+        watchdog = null;
+      }
       console.log(`[ws] disconnected from hub (code ${code})`);
       scheduleReconnect();
     });
