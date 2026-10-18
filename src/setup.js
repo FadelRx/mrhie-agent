@@ -26,6 +26,7 @@ const { fetchPacks } = require('./pack');
 const { pushItems } = require('./push');
 const { runSync, isRunning, getProgress, connectHosxp, loadState, computeCutoff, makeMapLimit, PACK_PATH } = require('./sync');
 const logbuf = require('./logbuf');
+const { resolveSetupToken } = require('./setup-token');
 
 const ENV_PATH = process.env.AGENT_ENV || path.join(__dirname, '..', '.env');
 const MASK = '__KEEP__';   // ส่งกลับมาแทนค่าเดิม = ไม่เปลี่ยนรหัส
@@ -303,7 +304,8 @@ details summary{font-size:12.5px;font-weight:700;cursor:pointer}
 .pbar{height:22px;border:2px solid var(--ink);border-radius:11px;background:#fdfcf7;overflow:hidden;margin-top:10px;position:relative}
 .pbar>i{display:block;height:100%;background:var(--accent);transition:width .6s ease}
 .pbar>b{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:11.5px;font-style:normal}`;
-const FONT = `<link rel='preconnect' href='https://fonts.googleapis.com'><link href='https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@400;600;700&family=IBM+Plex+Mono:wght@500&display=swap' rel='stylesheet'>`;
+// ไม่ดึงฟอนต์จาก CDN — เครื่อง agent ใน รพ. ส่วนใหญ่อยู่วงปิด ออกเน็ตไม่ได้ (และไม่ควรต้องออก)
+const FONT = '';
 
 function page() {
   const c = readCurrent();
@@ -565,7 +567,7 @@ async function restartAgent(){
   const el = $('st_sync');
   if (!confirm('รีสตาร์ท agent เพื่อโหลด config ใหม่?')) return;
   show(el, 'run', 'กำลังรีสตาร์ท agent...');
-  try { await fetch('/api/restart', { method:'POST' }); } catch(e){}   // โปรเซสจะดับ -> fetch อาจ error เป็นเรื่องปกติ
+  try { await fetch('/api/restart', { method:'POST', headers:{'Content-Type':'application/json'}, body:'{}' }); } catch(e){}   // โปรเซสจะดับ -> fetch อาจ error เป็นเรื่องปกติ
   // รอโปรเซสใหม่ขึ้น (supervisor respawn) แล้วเช็คว่ากลับมาหรือยัง
   var tries = 0;
   var poll = setInterval(async function(){
@@ -596,15 +598,111 @@ const json = (res, code, obj) => { res.writeHead(code, { 'Content-Type': 'applic
 
 function startSetup(opts = {}) {
   logbuf.install();   // เก็บ log เข้า buffer ให้แท็บสถานะอ่านได้
+  // โหลด .env (AGENT_ENV) ก่อนอ่าน SETUP_* — `node src/index.js --setup` ไม่ผ่าน loadConfig()
+  // ถ้าไม่โหลดตรงนี้ SETUP_HOST/SETUP_TOKEN ที่ตั้งใน .env จะถูกเพิกเฉยเงียบ ๆ
+  loadDotEnv();
   const args = process.argv;
   const host = (args[args.indexOf('--host') + 1] && args.includes('--host')) ? args[args.indexOf('--host') + 1] : (process.env.SETUP_HOST || '127.0.0.1');
   const port = Number((args.includes('--port') && args[args.indexOf('--port') + 1]) || process.env.SETUP_PORT || 7070);
+  let publicOrigin = '';
+  if (process.env.SETUP_PUBLIC_ORIGIN) {
+    try { publicOrigin = new URL(String(process.env.SETUP_PUBLIC_ORIGIN)).origin; }
+    catch {
+      console.error('[setup] ❌ SETUP_PUBLIC_ORIGIN ต้องเป็น URL แบบเต็ม เช่น https://agent.example.org');
+      return;
+    }
+  }
   const cronActive = !!opts.cronActive;   // true = โปรเซสนี้รัน cron อยู่ด้วย (npm start)
 
+  // ---------- ผูกออกนอก loopback = ต้องมีรหัสผ่าน ----------
+  // หน้านี้แก้ค่า hub url / ดูสถานะ / สั่ง sync ได้ ถ้าเปิดออก LAN โดยไม่มีการยืนยันตัวตน
+  // ใครก็ตามในวง รพ. จะชี้ agent ไปยัง hub ปลอมแล้วดูดข้อมูลผู้ป่วยออกไปได้
+  // จึงบังคับ: host ที่ไม่ใช่ loopback ต้องตั้ง SETUP_TOKEN ก่อน ไม่งั้นไม่เปิดพอร์ตให้
+  const isLoopback = (host === '127.0.0.1' || host === 'localhost' || host === '::1');
+  // รหัส: SETUP_TOKEN (env/.env) หรือ SETUP_TOKEN_FILE (Docker: สุ่มครั้งแรกแล้วเก็บใน volume) — ดู setup-token.js
+  let tok = { token: '' };
+  if (!isLoopback) {
+    try { tok = resolveSetupToken(process.env); }
+    catch (e) {
+      console.error(`\n[setup] ❌ ไม่เปิดหน้าเว็บ — อ่านรหัสจาก SETUP_TOKEN_FILE ไม่ได้: ${e.message}\n`);
+      return;
+    }
+  }
+  const token = tok.token;
+  if (!isLoopback && !token) {
+    console.error(`\n[setup] ❌ ไม่เปิดหน้าเว็บที่ host '${host}' เพราะยังไม่ได้ตั้งรหัสป้องกัน`);
+    console.error("[setup]    หน้านี้แก้การตั้งค่า agent ได้ เปิดออกเครือข่ายโดยไม่มีรหัส = ใครก็เข้ามาแก้ได้");
+    console.error("[setup]    วิธีแก้: ตั้ง SETUP_TOKEN='<สตริงยาว ๆ>' ใน .env หรือ SETUP_TOKEN_FILE=<ไฟล์> (สุ่มให้เอง) แล้วเปิดใหม่");
+    console.error("[setup]    หรือใช้ค่าเริ่มต้น (127.0.0.1) แล้ว remote เข้าเครื่องนั้นแทน\n");
+    return;
+  }
+  // แสดงรหัสที่สุ่มใหม่ "ครั้งเดียว" ตอนสร้าง (เช่น docker compose logs) — รอบถัดไปบอกแค่ที่อยู่ไฟล์
+  if (tok.generated) {
+    console.log(`\n[setup] 🔑 สร้างรหัสเข้าหน้าตั้งค่าครั้งแรก เก็บไว้ที่ ${tok.file} (แสดงใน log ครั้งนี้ครั้งเดียว)`);
+    console.log(`[setup]    เปิด: http://127.0.0.1:${port}/?token=${token}`);
+  } else if (tok.source === 'file') {
+    console.log(`[setup] 🔑 ใช้รหัสเข้าหน้าตั้งค่าจาก ${tok.file} (Docker ดูรหัส: docker compose exec agent cat ${tok.file})`);
+  }
+
+  // ตรวจรหัสจาก header 'x-setup-token' หรือ query ?token= (เบราว์เซอร์เข้าครั้งแรกใช้ query ได้)
+  // เทียบแบบ timing-safe กันเดารหัสทีละตัวอักษร
+  function tokenOk(req) {
+    if (isLoopback || !token) return true;                 // loopback = เชื่อว่าเป็นคนที่เครื่องนั้นอยู่แล้ว
+    let sent = String(req.headers['x-setup-token'] || '');
+    if (!sent) {                                            // เข้าครั้งแรกจากเบราว์เซอร์: ?token=...
+      try { sent = new URL(req.url, 'http://x').searchParams.get('token') || ''; } catch { sent = ''; }
+    }
+    if (!sent) {                                            // เรียกครั้งถัดไป: cookie ที่ตั้งให้ตอนเปิดหน้าแรก
+      const raw = String(req.headers.cookie || '');
+      for (const part of raw.split(';')) {
+        const i = part.indexOf('=');
+        if (i > 0 && part.slice(0, i).trim() === 'setup_token') { sent = decodeURIComponent(part.slice(i + 1).trim()); break; }
+      }
+    }
+    const a = Buffer.from(sent), b = Buffer.from(token);
+    return a.length === b.length && require('crypto').timingSafeEqual(a, b);
+  }
+
   const server = http.createServer(async (req, res) => {
+    if (!tokenOk(req)) {
+      console.warn(`[setup] ปฏิเสธคำขอจาก ${req.socket.remoteAddress} (รหัสไม่ถูกต้อง) — ${req.method} ${String(req.url).split('?')[0]}`);
+      res.writeHead(401, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('unauthorized — ต้องแนบ ?token=<SETUP_TOKEN>');
+    }
     try {
-      if (req.method === 'GET' && (req.url === '/' || req.url === '/index.html')) {
-        res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' }); return res.end(page());
+      const urlPath = String(req.url || '/').split('?')[0];
+      // Browser CSRF protection for every state-changing setup API. Same-origin
+      // fetches carry Origin; non-browser clients may omit it, but an explicitly
+      // cross-site Origin/Fetch-Metadata value is never accepted.
+      if (req.method === 'POST' && urlPath.startsWith('/api/')) {
+        const fetchSite = String(req.headers['sec-fetch-site'] || '').toLowerCase();
+        const origin = String(req.headers.origin || '');
+        let sameOrigin = true;
+        if (origin) {
+          try {
+            // Direct/local setup uses HTTP. If an operator deliberately puts
+            // this UI behind HTTPS, they must pin the one external origin
+            // explicitly instead of trusting forgeable forwarded headers.
+            const expected = publicOrigin || new URL(`http://${req.headers.host || ''}`).origin;
+            sameOrigin = new URL(origin).origin === expected;
+          } catch { sameOrigin = false; }
+        }
+        if (fetchSite === 'cross-site' || !sameOrigin) {
+          return json(res, 403, { ok: false, message: 'cross-origin request rejected' });
+        }
+        const contentType = String(req.headers['content-type'] || '').split(';', 1)[0].trim().toLowerCase();
+        if (contentType !== 'application/json') {
+          return json(res, 415, { ok: false, message: 'Content-Type must be application/json' });
+        }
+      }
+      if (req.method === 'GET' && (urlPath === '/' || urlPath === '/index.html')) {
+        const head = { 'Content-Type': 'text/html; charset=utf-8' };
+        // ผ่านการตรวจรหัสมาแล้ว -> ฝากไว้ใน cookie ให้ fetch ของหน้านี้เรียก /api/* ต่อได้
+        // (โหมด loopback ไม่มี token ก็ไม่ต้องตั้ง)
+        if (!isLoopback && token) {
+          head['Set-Cookie'] = `setup_token=${encodeURIComponent(token)}; Path=/; HttpOnly; SameSite=Strict; Max-Age=43200`;
+        }
+        res.writeHead(200, head); return res.end(page());
       }
       if (req.method === 'GET' && req.url === '/api/status') {
         const c = readCurrent();

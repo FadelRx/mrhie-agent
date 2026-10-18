@@ -1,0 +1,14 @@
+# ไม่อบ secret/สถานะของเครื่อง build เข้า image — ค่าจริงของ container อยู่ใน volume /data
+.git
+.github
+node_modules
+test
+.env
+.env.*
+config.json
+.hub-key.json
+.setup-token
+.sync-state.json
+.query-pack.json
+.agent.lock
+*.log
