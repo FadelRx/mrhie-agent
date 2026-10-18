@@ -13,7 +13,7 @@ agent ทำงาน **2 ขา** พร้อมกันเมื่อรั
 
 ## ติดตั้ง
 
-ต้องมี Node.js 18+ และเข้าถึง HOSxP **slave/replica** ของ รพ. ได้ (read-only)
+ต้องมี Node.js 20+ และเข้าถึง HOSxP **slave/replica** ของ รพ. ได้ (read-only)
 
 ```bash
 npm install
@@ -23,9 +23,20 @@ npm run once     # ทดสอบ sync รอบเดียว (batch อย�
 npm start        # ★ รันจริง: cron + WS on-demand + หน้าสถานะ/ตั้งค่าที่ :7070 — ผ่าน supervisor (run.js) ที่ respawn ให้อัตโนมัติ
 ```
 
+ตรวจสอบแบบไม่เชื่อมต่อ HOSxP หรือ Hub จริง:
+
+```bash
+npm test
+npm run check    # tests + ตรวจ syntax ของไฟล์ runtime
+npm audit --audit-level=moderate
+docker compose config --quiet
+```
+
 > **`npm start` รันผ่าน `run.js` (supervisor)** — ถ้า agent ปิด/crash หรือกด **🔄 รีสตาร์ท** ในหน้า UI มันจะเปิดใหม่ให้เอง (โหลด `config.json`/`.env` ใหม่ทุกครั้ง — ไม่มีปัญหาค่าเก่าค้าง). ถ้าอยากรันตรงไม่ผ่าน supervisor ใช้ `npm run start:direct` (ปุ่มรีสตาร์ทจะแค่ปิด ไม่เปิดเอง)
 
 **`npm run setup`** เปิดหน้าเว็บ (local) 2 แท็บ: **⚙️ ตั้งค่า** เป็น wizard 4 ขั้น — ① โรงพยาบาล & Hub (วาง API key ที่ได้จากผู้ดูแล Hub + ทดสอบเชื่อมต่อ = activate) → ② HOSxP (ทดสอบ connect จริง) → ③ **ทดสอบส่งข้อมูล (dry-run)** ดึงข้อมูลจริงจำนวนตัวอย่างมาโชว์ว่า *จะส่ง dataset อะไร กี่แถว ขนาดรวมประมาณเท่าไหร่ กี่ batch* โดยไม่ส่งขึ้น Hub (ติ๊ก "ส่งจริง 1 batch" เพื่อพิสูจน์ครบวงจรได้) → ④ ตารางเวลา + 💾 บันทึก (เขียน `config.json` + `.env` ให้เอง) และ **📊 สถานะ** — ผล sync ล่าสุดราย job, ปุ่ม **▶ Sync ตอนนี้**, ปุ่ม **🔄 รีสตาร์ท agent** (โหลด config ใหม่ทันทีเมื่อรันผ่าน `npm start` — ไม่ต้องแตะ terminal), log ล่าสุด. หน้าเดียวกันนี้เปิดค้างอยู่ตลอดเมื่อรัน `npm start`. ค่าเริ่มต้นผูกกับ `127.0.0.1`; ถ้าต้องเข้าจากเครื่องอื่นใน LAN ใช้ `npm run setup -- --host 0.0.0.0 --port 8090` (เฉพาะวงปิดที่เชื่อถือได้)
+
+เมื่อ bind นอก loopback ต้องมี `SETUP_TOKEN` หรือ `SETUP_TOKEN_FILE` มิฉะนั้นหน้า setup จะไม่เปิด. Docker Compose ใช้ `/data/.setup-token`: ครั้งแรก agent สุ่ม token 256 บิต เก็บใน named volume และแสดง URL ที่มี token ใน log เพียงครั้งเดียว; ดู token ภายหลังด้วย `docker compose exec agent cat /data/.setup-token`. หน้าแรกจะแลก token เป็น cookie `HttpOnly; SameSite=Strict`. API ที่เปลี่ยนสถานะรับเฉพาะ `application/json` และปฏิเสธ browser request ข้าม origin. Compose publish พอร์ตเฉพาะ `127.0.0.1:7070` โดยค่าเริ่มต้น; หากจำเป็นต้องวางหลัง HTTPS reverse proxy ให้ตั้ง `SETUP_PUBLIC_ORIGIN=https://<โดเมน>` อย่างชัดเจน (ระบบไม่เชื่อ `X-Forwarded-*` จากผู้เรียกโดยอัตโนมัติ).
 
 **การขอ API key มีทางเดียว:** ผู้ดูแล Hub ออก key (เว็บจัดการระบบ → โรงพยาบาล → "ออก API key", แสดงครั้งเดียว) ส่งให้ รพ. → รพ. วาง key ในหน้า setup ขั้น ① แล้วกด "📡 ทดสอบเชื่อมต่อ Hub" เพื่อ activate → บันทึก (key ถูกเขียนลง `.env` ให้เอง). Hub เป็น root of trust: หมุน key/ปิด รพ. ได้ทุกเมื่อ + บันทึก access_log
 

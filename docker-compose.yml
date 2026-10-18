@@ -10,6 +10,10 @@ services:
       # ใน container ต้อง bind ทุก interface; เครื่อง host เปิดให้เฉพาะ localhost ด้านล่าง
       SETUP_HOST: 0.0.0.0
       SETUP_PORT: 7070
+      # รหัสเข้าหน้า setup: ครั้งแรกสุ่มให้เองแล้วเก็บใน volume (สิทธิ์ 0600) + แสดงใน log ครั้งเดียว
+      #   ดูภายหลัง: docker compose exec agent cat /data/.setup-token
+      #   (ห้ามใส่ SETUP_TOKEN ตรงนี้ — ไฟล์นี้อยู่ใน git)
+      SETUP_TOKEN_FILE: /data/.setup-token
       TZ: Asia/Bangkok
       # เก็บค่า setup, secret, cache pack และสถานะ sync ไว้ใน named volume
       AGENT_CONFIG: /data/config.json
@@ -17,8 +21,8 @@ services:
       AGENT_PACK: /data/.query-pack.json
       AGENT_STATE: /data/.sync-state.json
     ports:
-      # หน้าตั้งค่า/สถานะสำหรับเครื่องที่ติดตั้ง agent เท่านั้น
-      - "7070:7070"
+      # หน้าตั้งค่า/สถานะสำหรับเครื่องที่ติดตั้ง agent เท่านั้น (ไม่เปิดออก LAN)
+      - "127.0.0.1:7070:7070"
     volumes:
       - agent_data:/data
     restart: unless-stopped

@@ -4,16 +4,21 @@
   "description": "Med Reconciliation HIE - hospital sync agent (HOSxP -> Hub)",
   "type": "commonjs",
   "main": "src/index.js",
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "start": "node run.js",
     "start:direct": "node src/index.js",
     "once": "node src/index.js --once",
     "setup": "node src/index.js --setup",
-    "explain": "node src/explain.js"
+    "explain": "node src/explain.js",
+    "test": "node --test test/*.test.js",
+    "check": "npm test && node --check src/index.js && node --check src/setup.js && node --check src/setup-token.js && node --check src/config.js && node --check src/sync.js && node --check src/runner.js && node --check src/pack.js && node --check src/push.js && node --check src/wsclient.js && node --check src/ondemand.js && node --check src/logbuf.js && node --check src/explain.js && node --check src/probe-perf.js && node --check run.js"
   },
   "dependencies": {
-    "mysql2": "^3.9.7",
-    "node-cron": "^3.0.3",
-    "ws": "^8.21.0"
+    "mysql2": "^3.24.6",
+    "node-cron": "^4.6.0",
+    "ws": "^8.22.0"
   }
 }
